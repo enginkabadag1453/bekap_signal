@@ -234,10 +234,7 @@
     const indicatorLegend = $('#indicatorLegend');
     if (indicatorLegend) indicatorLegend.innerHTML = `<span class="legend-muted"><b>BEKAPTREND</b> · RSI(14) · ADX(14)</span><span class="legend-sell">Son SAT bölgesi <b>${n(lastSellZoneRsi)}</b></span><span class="legend-rsi">RSI <b>${n(latestIndicator?.rsi)}</b></span><span class="legend-buy">Son AL bölgesi <b>${n(lastBuyZoneRsi)}</b></span><span class="legend-sell">RSI 25 <b>25,00</b></span><span class="legend-adx">ADX <b>${n(latestIndicator?.adx)}</b></span>`;
     const indicatorLabels = [
-      { text: '70,00', value: matchedOverbought, color: COLORS.sell },
       { text: n(matchedSell), value: matchedSell, color: COLORS.basis },
-      { text: '50,00', value: 50, color: '#aeb7b2' },
-      { text: n(matchedBuy), value: matchedBuy, color: COLORS.buy },
       { text: '25,00', value: 25, color: COLORS.sell },
       { text: n(lastSellZoneRsi), value: lastSellZoneRsi, color: COLORS.sell },
       { text: n(latestIndicator?.rsi), value: latestIndicator?.rsi, color: COLORS.rsi },
@@ -326,8 +323,8 @@
 
     const panes = chart.panes();
     // Stretch factors set stable pane proportions; setHeight() is only a one-time redistribution hint.
-    if (panes[0]) panes[0].setStretchFactor(60);
-    if (panes[1]) panes[1].setStretchFactor(40);
+    if (panes[0]) panes[0].setStretchFactor(52);
+    if (panes[1]) panes[1].setStretchFactor(48);
     const range = $('#chartRange')?.value || '1Y';
     setRange(range);
 

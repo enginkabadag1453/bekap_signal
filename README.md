@@ -2,9 +2,15 @@
 
 Yerel ve özel kullanım için bağımsız uygulama. Ana seyahat uygulamasından ayrı çalışır.
 
-## Başlatma
+## Kurulum ve başlatma
 
-Windows'ta `start.bat` çalıştır ve `http://127.0.0.1:8766` adresini aç. İlk açılışta kullanıcının verdiği başlangıç sepeti SQLite'a eklenir:
+Python 3.10 veya üstünü kur. Proje klasöründe terminal açıp bağımlılıkları yükle:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+Ardından Windows'ta `start.bat` çalıştır ve `http://127.0.0.1:8766` adresini aç. İlk açılışta başlangıç sepeti yerel SQLite veritabanına eklenir:
 
 - AAPL — ömürlük
 - NVDA — trend
@@ -39,4 +45,8 @@ Fiyat kaynağı TradingView ile aynı veri borsası/adjustment ayarını garanti
 - Backtest, pozisyon/nakit muhasebesi, tarihsel kur, temettü/bölünme işleme ve maliyet modeli tamamlanana kadar performans üretmez. 02.01.2027 ileri-test kesimi gelecekteki sonuç gibi gösterilmez.
 - Telegram şimdilik önizleme/outbox; otomatik teslim yoktur. Emir göndermez.
 
-Uygulama yalnız `127.0.0.1` üzerinde dinler. Bu MVP internete açılmamalıdır; kullanıcı hesabı/tenant yetkileri henüz eklenmedi. Fonlar ikinci aşamadır.
+Uygulama yalnız `127.0.0.1` üzerinde dinler. Bu MVP internete açılmamalıdır; kullanıcı hesabı/tenant yetkileri henüz eklenmedi. Arkadaşların projeyi klonlayıp kendi bilgisayarlarında çalıştırabilir. Herkesin ortak bir çevrimiçi site kullanması için ayrıca dağıtım ve çok kullanıcılı erişim altyapısı gerekir. Fonlar ikinci aşamadır.
+
+## Lisans
+
+Bu projenin kendi kaynak kodu MIT lisansı altındadır. `static/vendor/lightweight-charts.js` TradingView Lightweight Charts'tır ve kendi Apache 2.0 lisansına tabidir; üçüncü taraf lisansı `static/vendor/LICENSE-Apache-2.0.txt` içindedir.
