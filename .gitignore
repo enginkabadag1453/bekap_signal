@@ -1,0 +1,11 @@
+provider.env
+bekap.sqlite3*
+.env
+.env.*
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+.playwright-cli/
+*.py[cod]
+*.log

@@ -1,0 +1,362 @@
+{
+  "AKBYS": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 70,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 10,
+    "filter": "NONE"
+  },
+  "AKSTS": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 10,
+    "filter": "NONE"
+  },
+  "GOLD": {
+    "buy": 37.5,
+    "tp": 65,
+    "overbought": 70,
+    "drop": 0.015,
+    "rise": 0.03,
+    "horizon": 10,
+    "filter": "NONE"
+  },
+  "BTCUSD": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 65,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 20,
+    "filter": "NONE"
+  },
+  "ETHUSD": {
+    "buy": 42.5,
+    "tp": 67.5,
+    "overbought": 65,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 20,
+    "filter": "BELOW"
+  },
+  "GLOBALFINTECH": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 65,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 30,
+    "filter": "ABOVE"
+  },
+  "ICESEMIT": {
+    "buy": 37.5,
+    "tp": 67.5,
+    "overbought": 65,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 30,
+    "filter": "NONE"
+  },
+  "ISIST": {
+    "buy": 37.5,
+    "tp": 67.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 10,
+    "filter": "ABOVE"
+  },
+  "ISKDN": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 20,
+    "filter": "NONE"
+  },
+  "KCHOL": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 70,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 30,
+    "filter": "NONE"
+  },
+  "NQCYBRT": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 5,
+    "filter": "ABOVE"
+  },
+  "NQROBO": {
+    "buy": 40,
+    "tp": 67.5,
+    "overbought": 70,
+    "drop": 0.015,
+    "rise": 0.03,
+    "horizon": 20,
+    "filter": "BELOW"
+  },
+  "NTTR": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 30,
+    "filter": "ABOVE"
+  },
+  "OOI": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 10,
+    "filter": "BELOW"
+  },
+  "RSBLCNN": {
+    "buy": 37.5,
+    "tp": 67.5,
+    "overbought": 65,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 20,
+    "filter": "BELOW"
+  },
+  "S5HLTH": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 30,
+    "filter": "BELOW"
+  },
+  "S5INFT": {
+    "buy": 42.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.025,
+    "rise": 0.02,
+    "horizon": 10,
+    "filter": "ABOVE"
+  },
+  "SILVER": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 65,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 30,
+    "filter": "NONE"
+  },
+  "SPX": {
+    "buy": 37.5,
+    "tp": 65,
+    "overbought": 70,
+    "drop": 0.015,
+    "rise": 0.03,
+    "horizon": 30,
+    "filter": "BELOW"
+  },
+  "SX5E": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 65,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 30,
+    "filter": "NONE"
+  },
+  "UKOIL": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 20,
+    "filter": "NONE"
+  },
+  "XBANK": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 20,
+    "filter": "BELOW"
+  },
+  "XELKT": {
+    "buy": 37.5,
+    "tp": 67.5,
+    "overbought": 65,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 10,
+    "filter": "NONE"
+  },
+  "XELOT": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 65,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 20,
+    "filter": "NONE"
+  },
+  "XK030": {
+    "buy": 37.5,
+    "tp": 65,
+    "overbought": 65,
+    "drop": 0.015,
+    "rise": 0.03,
+    "horizon": 30,
+    "filter": "NONE"
+  },
+  "XK050": {
+    "buy": 37.5,
+    "tp": 65,
+    "overbought": 70,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 20,
+    "filter": "NONE"
+  },
+  "XSD": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 30,
+    "filter": "ABOVE"
+  },
+  "XSPOR": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 65,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 5,
+    "filter": "ABOVE"
+  },
+  "XSRDK": {
+    "buy": 37.5,
+    "tp": 67.5,
+    "overbought": 65,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 10,
+    "filter": "NONE"
+  },
+  "XTKJS": {
+    "buy": 42.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 20,
+    "filter": "NONE"
+  },
+  "XTM25": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 10,
+    "filter": "NONE"
+  },
+  "XTMTU": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 10,
+    "filter": "NONE"
+  },
+  "XTUMY": {
+    "buy": 42.5,
+    "tp": 67.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 20,
+    "filter": "NONE"
+  },
+  "XU030": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 30,
+    "filter": "NONE"
+  },
+  "XU050": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 30,
+    "filter": "NONE"
+  },
+  "XU100": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 10,
+    "filter": "NONE"
+  },
+  "XUMAL": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 70,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 10,
+    "filter": "NONE"
+  },
+  "XUSIN": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 10,
+    "filter": "NONE"
+  },
+  "XUSRD": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 75,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 10,
+    "filter": "NONE"
+  },
+  "XYUZO": {
+    "buy": 37.5,
+    "tp": 62.5,
+    "overbought": 65,
+    "drop": 0.015,
+    "rise": 0.02,
+    "horizon": 20,
+    "filter": "NONE"
+  }
+}
