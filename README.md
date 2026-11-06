@@ -10,7 +10,7 @@ Python 3.10 veya üstünü kur. Proje klasöründe terminal açıp bağımlılı
 python -m pip install -r requirements.txt
 ```
 
-Ardından Windows'ta `start.bat` çalıştır ve `http://127.0.0.1:8766` adresini aç. İlk açılışta başlangıç sepeti yerel SQLite veritabanına eklenir:
+Ardından Windows'ta `start.bat` çalıştır ve `http://127.0.0.1:8767` adresini aç. Başlatıcı yalnızca 8767 portunu kullanır. İlk açılışta başlangıç sepeti yerel SQLite veritabanına eklenir:
 
 - AAPL — ömürlük
 - NVDA — trend
@@ -40,8 +40,9 @@ Fiyat kaynağı TradingView ile aynı veri borsası/adjustment ayarını garanti
 ## Sinyal/strateji sınırı
 
 - Grafik ve sinyal günlüğü, kullanıcı dosyasındaki BEKAPRSI AUTO Pine durum makinesinden port edilmiştir; sembole özel AUTO tabloları `bekap_params.json` içindedir. BEKAPTREND RSI/ADX alt paneli de kullanıcı Pine kaynağından çizilir.
+- Fren, son günlük SAT kapanışından itibaren tamamlanmış günlük kapanış %21 veya daha fazla düştüğünde etkinleşir. Fren boyunca AL teyitleri haftalık, SAT teyitleri günlük kapanmış mumlardan alınır. Yeni günlük SAT fren durumunu bitirir; günlük AL takibi devam eder.
 - Sinyal kapanmış mumda teyit edilir; varsayımsal işlem fiyatı sonraki seans açılışıdır. Ham indikatör işareti kendi başına pozisyon/emir oluşturmaz.
-- Grafik çizimi, veri tarih aralığı ve Pine işaretleri birleştirildi. Haftalık %21 fren ile portföy rolüne göre kâr payı/tam çıkış muhasebesi henüz bu grafik portuna bağlanmadı; bu davranışları aynı sinyal motora almak sonraki sistem adımıdır.
+- Haftalık fren, sinyal tablosu ve grafik işaretlerinde aynı sinyal motoruyla uygulanır. Portföy rolüne göre kâr payı/tam çıkış muhasebesi henüz bu sinyal motoruna bağlanmadı.
 - Backtest, pozisyon/nakit muhasebesi, tarihsel kur, temettü/bölünme işleme ve maliyet modeli tamamlanana kadar performans üretmez. 02.01.2027 ileri-test kesimi gelecekteki sonuç gibi gösterilmez.
 - Telegram şimdilik önizleme/outbox; otomatik teslim yoktur. Emir göndermez.
 

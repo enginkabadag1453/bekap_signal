@@ -161,10 +161,13 @@
     const markers = [];
     const signalBadges = [];
     if (showSignals) {
-      for (const r of rows) {
-        const bar = bars.find(item => item.date === r.date);
-        if (r.buy && bar) signalBadges.push({ time: r.date, value: Number(bar.low), side: 'buy', text: `EKLE (${r.buy_diff == null ? 'İlk' : `${r.buy_diff > 0 ? '+' : ''}${pct(r.buy_diff)}%`})` });
-        if (r.tp && bar) signalBadges.push({ time: r.date, value: Number(bar.high), side: 'sell', text: `KÂR AL (${r.tp_diff == null ? 'İlk' : `${r.tp_diff > 0 ? '+' : ''}${pct(r.tp_diff)}%`})` });
+      for (const signal of data.strategy_signals || []) {
+        const bar = bars.find(item => item.date === signal.chart_date);
+        if (!bar) continue;
+        const isBuy = signal.event === 'buy_confirmed';
+        const change = signal.change_pct == null ? 'İlk' : `${signal.change_pct > 0 ? '+' : ''}${pct(signal.change_pct)}%`;
+        signalBadges.push({ time: signal.chart_date, value: Number(isBuy ? bar.low : bar.high),
+          side: isBuy ? 'buy' : 'sell', text: `${isBuy ? 'EKLE' : 'KÂR AL'} (${change})` });
       }
       for (const action of data.actions || []) {
         if (action.kind !== 'dividend') continue;
@@ -399,8 +402,12 @@
     const timeframePill = document.querySelector('.timeframe-pill');
     if (timeframePill) timeframePill.textContent = data.timeframe === 'D' ? 'GÜNLÜK' : 'HAFTALIK';
     $('#chartLegend').textContent = `${data.symbol} · ${data.timeframe === 'D' ? 'Günlük' : data.current_bar_provisional ? 'Hafta başlangıcı ' + dateText(data.last_bar_date) + ' · geçici veri ' + dateText(data.last_daily_bar_date) : 'Haftalık'} · Kapanış ${n(lastBar.close)} ${data.currency} · Hacim ${n(lastBar.volume)} · Bollinger (20, 2): orta ${n(latest.bb_mid)} / üst ${n(latest.bb_upper)} / alt ${n(latest.bb_lower)} · SMA 200 ${n(latest.sma200)} · RSI ${n(latest.rsi)} · ADX ${n(latest.adx)}`;
-    const signals = rows.filter(r => r.buy || r.tp).slice(-30).reverse();
-    $('#detailSignals').innerHTML = signals.length ? signals.map(r => `<div class="signal-item"><span class="signal-date">${dateText(r.date)}</span><div><b>${r.buy ? 'EKLE' : 'KÂR AL'} · ${data.symbol}</b><p>Kapanış ${n(bars.find(b => b.date === r.date)?.close)} ${data.currency} · Göreli güç (RSI) ${n(r.rsi)} · Kullanılan ayar: ${p.ticker || data.symbol}</p></div><span class="signal-buy">${data.timeframe === 'D' ? 'Günlük' : 'Haftalık'}</span></div>`).join('') : '<div class="empty">Gösterilen dönemde ve tamamlanmış mumlarda EKLE veya KÂR AL işareti yok.</div>';
+    const signals = (data.strategy_signals || []).filter(signal => bars.some(bar => bar.date === signal.chart_date)).slice(-30).reverse();
+    $('#detailSignals').innerHTML = signals.length ? signals.map(signal => {
+      const bar = bars.find(item => item.date === signal.chart_date);
+      const buy = signal.event === 'buy_confirmed';
+      return `<div class="signal-item"><span class="signal-date">${dateText(signal.signal_date)}</span><div><b>${buy ? 'EKLE' : 'KÂR AL'} · ${data.symbol}</b><p>Kapanış ${n(signal.close_price ?? bar?.close)} ${data.currency} · Göreli güç (RSI) ${n(signal.rsi)} · Kullanılan ayar: ${p.ticker || data.symbol}</p></div><span class="signal-buy">${signal.timeframe === '1D' ? 'Günlük' : 'Haftalık'}</span></div>`;
+    }).join('') : '<div class="empty">Gösterilen dönemde ve tamamlanmış mumlarda EKLE veya KÂR AL işareti yok.</div>';
     chart.subscribeCrosshairMove(param => {
       const price = param.seriesData.get(main), r = param.seriesData.get(rsiLine), a = param.seriesData.get(adx);
       if (!price) return;

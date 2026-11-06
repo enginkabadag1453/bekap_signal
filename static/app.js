@@ -1,5 +1,6 @@
 const $ = s => document.querySelector(s);
 const roleTR = { lifetime: 'Ömürlük', trend: 'Trend', periodic: 'Dönemsel' };
+let signalTableRows = [];
 
 async function api(url, opts = {}) {
   const response = await fetch(url, opts);
@@ -27,9 +28,17 @@ const dateTR = value => {
   const match = String(value ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/);
   return match ? `${match[3]}.${match[2]}.${match[1]}` : (value || '—');
 };
+const dateTimeTR = value => {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? '—' : new Intl.DateTimeFormat('tr-TR', {
+    timeZone: 'Europe/Istanbul', day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+  }).format(parsed);
+};
 const eventTR = value => ({ buy_confirmed: 'ALIM teyidi', take_profit_confirmed: 'KÂR AL teyidi', full_exit: 'Tam çıkış' }[value] || value || '—');
 const reasonTR = value => String(value || '—').replace('BEKAPRSI AUTO EKLE:', 'BEKAPRSI alım teyidi:').replace('BEKAPRSI AUTO KAR AL:', 'BEKAPRSI kâr-al teyidi:').replace('RSI(14)', 'göreli güç endeksi (RSI)').replace(/(?<![\w.])([+-]?\d+(?:\.\d+)?)(?![\w.])/g, token => numberTR(Number(token)));
 const timeframeTR = value => value === '1D' || value === 'D' ? 'Günlük' : value === '1W' || value === 'W' ? 'Haftalık' : value;
+const signalActionTR = value => value === 'buy_confirmed' ? 'AL' : ['take_profit_confirmed', 'full_exit'].includes(value) ? 'SAT' : null;
 const dataErrorTR = value => ({
   "TWELVE_DATA_API_KEY tanımlı değil": 'Fiyat sağlayıcısına şu anda erişilemiyor.',
   'Henüz tamamlanmış günlük bar gelmedi': 'Tamamlanmış günlük kapanış henüz yayımlanmadı.',
@@ -54,8 +63,12 @@ async function load() {
     const d = await api('/api/overview');
     $('#assetCount').textContent = numberTR(d.assets.length);
     const signalLists = await Promise.all(d.assets.map(a => api(`/api/assets/${a.id}/signals`).catch(() => [])));
-    const recentSignals = signalLists.flat().sort((a, b) => String(b.signal_date).localeCompare(String(a.signal_date)) || b.id - a.id).slice(0, 30);
-    $('#signalCount').textContent = numberTR(signalLists.reduce((total, list) => total + list.length, 0));
+    signalTableRows = d.assets.map((asset, index) => {
+      const latest = [...signalLists[index]].sort((a, b) => String(b.signal_date).localeCompare(String(a.signal_date)) || Number(b.id) - Number(a.id))[0];
+      const action = latest ? signalActionTR(latest.event) : null;
+      return latest && action ? { ...latest, action, asset } : null;
+    }).filter(Boolean).sort((a, b) => String(b.signal_date).localeCompare(String(a.signal_date)) || Number(b.id) - Number(a.id));
+    renderSignalTable(d.as_of);
     $('#version').textContent = String(d.strategy_version).replace(/(\d+)\.(\d+)\.(\d+)/, '$1,$2,$3');
     const ready = d.assets.filter(a => a.data_status === 'ok').length;
     $('#dataState').textContent = `Otomatik kapanış verisi: ${numberTR(ready)} / ${numberTR(d.assets.length)} varlık`;
@@ -90,12 +103,6 @@ async function load() {
     if (selected) await window.loadSignalChart(selected);
     const selectedAsset = d.assets.find(a => String(a.id) === selected);
     if (selectedAsset && $('#instrumentSub')) $('#instrumentSub').textContent = `${selectedAsset.market} · ${selectedAsset.currency} · ${roleTR[selectedAsset.role] || selectedAsset.role} · Günlük kapanış`;
-    const selectedSignals = recentSignals.filter(s => selectedAsset && Number(s.asset_id) === Number(selectedAsset.id)).slice(0, 8);
-    $('#signals').innerHTML = selectedSignals.length ? selectedSignals.map(s => `<div class="signal-item ${s.event === 'take_profit_confirmed' ? 'event-sell' : s.event === 'full_exit' ? 'event-exit' : 'event-buy'}">
-      <span class="signal-date">${dateTR(s.signal_date)}</span><div><b>${esc(s.symbol)} · ${eventTR(s.event)}</b>
-      <p>${esc(reasonTR(s.reason))} · Göreli güç endeksi (RSI) ${numberTR(s.rsi)} · ${timeframeTR(s.timeframe)}</p></div>
-      <span class="signal-buy">${s.execution_price ? `Tahmini işlem ${numberTR(s.execution_price)}` : 'Sonraki seans bekleniyor'}</span>
-    </div>`).join('') : '<div class="empty">Seçili varlıkta henüz teyit edilmiş sinyal yok.</div>';
     const st = d.settings;
     for (const key of ['initial_capital_usd', 'monthly_contribution_usd', 'fees_bps', 'slippage_bps', 'forward_start']) {
       const input = $(`[name="${key}"]`);
@@ -108,6 +115,24 @@ async function load() {
   } catch (error) {
     console.error(error);
   }
+}
+
+function renderSignalTable(asOf = new Date().toISOString()) {
+  const filter = $('#signalFilter')?.value || 'ALL';
+  const rows = signalTableRows.filter(row => filter === 'ALL' || row.action === filter);
+  $('#signalCount').textContent = numberTR(rows.length);
+  $('#signalUpdated').textContent = dateTimeTR(asOf);
+  $('#signals').innerHTML = rows.length ? rows.map(row => {
+    const asset = row.asset;
+    const periodClass = row.timeframe === '1W' || row.timeframe === 'W' ? 'signal-period-weekly' : 'signal-period-daily';
+    const actionClass = row.action === 'AL' ? 'signal-action-buy' : 'signal-action-sell';
+    return `<tr>
+      <td><span class="signal-asset">${esc(asset.symbol)}</span><span class="signal-market">${esc(roleTR[asset.role] || asset.role)}</span></td>
+      <td class="${periodClass}">${timeframeTR(row.timeframe)}</td>
+      <td><span class="signal-action ${actionClass}">${row.action}</span></td>
+      <td class="signal-date">${dateTR(row.signal_date)}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="4" class="empty">${filter === 'ALL' ? 'Şu anda sepetinizde teyit edilmiş AL veya SAT sinyali yok.' : `Şu anda teyit edilmiş ${filter} sinyali yok.`}</td></tr>`;
 }
 
 window.removeAsset = async id => {
@@ -201,7 +226,7 @@ $('#uploadForm').onsubmit = async event => {
 window.refreshMarketData = async () => {
   const button = $('#refreshData'); button.disabled = true; button.innerHTML = '⟳ <span>Güncelleniyor…</span>';
   try {
-    const data = await api('/api/data/refresh');
+    const data = await api('/api/data/refresh', { method: 'POST' });
     $('#dataInfo').textContent = `Güncelleme tamamlandı: ${numberTR(data.updated)} / ${numberTR(data.results.length)} varlık. Başarısız varlıkların durumu tabloda gösterilir.`;
     await load();
     return data;
@@ -209,6 +234,8 @@ window.refreshMarketData = async () => {
   finally { button.disabled = false; button.innerHTML = '⟳ <span>Veriyi güncelle</span>'; }
 };
 $('#refreshData').onclick = window.refreshMarketData;
+$('#signalFilter').onchange = () => renderSignalTable();
+$('#signalRefresh').onclick = () => window.refreshMarketData();
 
 $('#clock').textContent = new Intl.DateTimeFormat('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date());
 setInterval(load, 5 * 60 * 1000);

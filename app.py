@@ -29,6 +29,7 @@ import bekap_indicators
 ROOT = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("BEKAP_DB_PATH", ROOT / "bekap.sqlite3"))
 VERSION = "0.2.0"
+WEEKLY_BRAKE_ENGINE_VERSION = "weekly-brake-v1"
 app = FastAPI(title="BEKAP Esinli Sepet Sinyal Sistemi", version=VERSION)
 app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
 
@@ -64,7 +65,7 @@ def initialize() -> None:
           timeframe TEXT NOT NULL, signal_date TEXT NOT NULL, confirmed_at TEXT NOT NULL,
           close_price REAL NOT NULL, execution_date TEXT, execution_price REAL,
           rsi REAL, reason TEXT NOT NULL, strategy_version TEXT NOT NULL,
-          payload_json TEXT NOT NULL);
+          payload_json TEXT NOT NULL, is_current INTEGER NOT NULL DEFAULT 1);
         CREATE TABLE IF NOT EXISTS outbox(
           id INTEGER PRIMARY KEY, event_key TEXT NOT NULL UNIQUE,
           signal_id INTEGER NOT NULL REFERENCES signals(id) ON DELETE CASCADE, status TEXT NOT NULL DEFAULT 'pending',
@@ -81,6 +82,9 @@ def initialize() -> None:
           action_date TEXT NOT NULL, kind TEXT NOT NULL, value REAL NOT NULL,
           PRIMARY KEY(asset_id,action_date,kind));
         """)
+        signal_columns = {row["name"] for row in con.execute("PRAGMA table_info(signals)")}
+        if "is_current" not in signal_columns:
+            con.execute("ALTER TABLE signals ADD COLUMN is_current INTEGER NOT NULL DEFAULT 1")
         con.executescript("""
         DROP TRIGGER IF EXISTS asset_market_data_autocreate;
         CREATE TRIGGER IF NOT EXISTS asset_market_data_autocreate
@@ -124,7 +128,8 @@ def initialize() -> None:
 DEFAULT_CONFIG = {
     "rsi_period": 14, "buy_zone_max": 35, "turn_up_required": True,
     "indicator_engine": "BEKAPRSI AUTO user Pine v6 + BEKAPTREND RSI/ADX visual port",
-    "weekly_brake_drawdown_pct": 21, "weekly_return_rule": "daily_take_profit_signal",
+    "weekly_brake_drawdown_pct": 21,
+    "weekly_return_rule": "weekly_buys_daily_sells_until_daily_take_profit",
     "lifetime_sell_rule": "profit_only", "trend_periodic_sell_rule": "full_exit",
     "buy_fraction_of_cash": 0.1, "max_position_fraction": 0.2,
     "monthly_contribution_usd": 0, "initial_capital_usd": 0,
@@ -417,10 +422,11 @@ def sync_market_data(asset_ids: set[int] | None = None) -> dict[str, Any]:
                 con.execute("""UPDATE market_data_state SET status='ok',provider=?,last_checked=?,last_bar_date=?,last_error=NULL
                     WHERE asset_id=?""", (provider, checked, last_date, asset["id"]))
             rebuild_weekly_bars(asset["id"])
-            signal_result = run_signals(asset["id"], "1D", notify_after=asset["prior_last_bar_date"])
-            weekly_result = run_signals(asset["id"], "1W", notify_after=asset["prior_week_date"])
+            signal_result = run_weekly_brake_signals(asset["id"],
+                notify_after_daily=asset["prior_last_bar_date"],
+                notify_after_weekly=asset["prior_week_date"])
             results.append({"symbol": asset["symbol"], "status": "ok", "provider": provider, "last_bar_date": last_date,
-                            "currency": meta.get("currency", ""), "signals_created": signal_result["created"] + weekly_result["created"]})
+                            "currency": meta.get("currency", ""), "signals_created": signal_result["created"]})
         except Exception as exc:
             with db() as con:
                 con.execute("UPDATE market_data_state SET status='error',last_checked=?,last_error=? WHERE asset_id=?",
@@ -520,10 +526,24 @@ def build_chart_payload(asset_id: int, timeframe: str = "D") -> dict[str, Any]:
     bars = daily if timeframe == "D" else _weekly_chart_ohlc(daily)
     if not bars:
         return {"symbol": asset["symbol"], "currency": asset["currency"], "timeframe": timeframe,
-                "bars": [], "indicators": [], "actions": [], "profile": {},
+                "bars": [], "indicators": [], "actions": [], "strategy_signals": [], "profile": {},
                 "source": source["provider"] if source else None,
                 "last_bar_date": None, "error": source["last_error"] if source else "Henüz fiyat verisi yok."}
     calc = bekap_indicators.calculate(bars, asset["symbol"], asset["market"])
+    daily_calc = calc if timeframe == "D" else bekap_indicators.calculate(daily, asset["symbol"], asset["market"])
+    confirmed_weekly = _weekly_ohlc(daily)
+    weekly_calc = (calc if timeframe == "W" and not bars[-1].get("provisional")
+                   else bekap_indicators.calculate(confirmed_weekly, asset["symbol"], asset["market"]))
+    parameters = json.loads(asset["parameters_json"] or "{}")
+    brake_pct = float(parameters.get("weekly_brake_drawdown_pct", DEFAULT_CONFIG["weekly_brake_drawdown_pct"]))
+    strategy_signals = weekly_brake_events(daily, daily_calc["rows"], confirmed_weekly,
+                                           weekly_calc["rows"], brake_pct)
+    chart_dates = {str(bar["date"])[:10] for bar in bars}
+    for signal in strategy_signals:
+        signal_day = date.fromisoformat(signal["signal_date"])
+        signal["chart_date"] = (signal_day.isoformat() if timeframe == "D"
+                                else (signal_day - timedelta(days=signal_day.weekday())).isoformat())
+    strategy_signals = [signal for signal in strategy_signals if signal["chart_date"] in chart_dates]
     closes = [float(r["close"]) for r in bars]
     rows = calc["rows"]
     current_week_provisional = timeframe == "W" and bool(bars[-1].get("provisional"))
@@ -539,9 +559,9 @@ def build_chart_payload(asset_id: int, timeframe: str = "D") -> dict[str, Any]:
         middle = sum(window) / 20
         deviation = statistics.pstdev(window)
         row.update(bb_mid=middle, bb_upper=middle + 2 * deviation, bb_lower=middle - 2 * deviation)
-    confirmed_weekly = _weekly_ohlc(daily) if timeframe == "W" else []
     return {"symbol": asset["symbol"], "market": asset["market"], "currency": asset["currency"],
             "timeframe": timeframe, "bars": bars, "indicators": rows, "actions": actions,
+            "strategy_signals": strategy_signals,
             "profile": calc["profile"], "indicator_version": calc["version"],
             "source": source["provider"] if source else "—", "last_bar_date": bars[-1]["date"],
             "last_confirmed_bar_date": (confirmed_weekly[-1]["date"] if confirmed_weekly else bars[-1]["date"]),
@@ -567,7 +587,8 @@ def overview() -> dict[str, Any]:
             (SELECT b.date FROM bars b WHERE b.asset_id=a.id AND b.timeframe='1D' ORDER BY b.date DESC LIMIT 1) price_date
             FROM assets a LEFT JOIN market_data_state m ON m.asset_id=a.id ORDER BY a.symbol""")]
         recent = [dict(r) for r in con.execute("""SELECT s.*,a.symbol,a.role,a.currency FROM signals s
-          JOIN assets a ON a.id=s.asset_id ORDER BY s.signal_date DESC,s.id DESC LIMIT 30""")]
+          JOIN assets a ON a.id=s.asset_id WHERE s.is_current=1 AND s.strategy_version LIKE ?
+          ORDER BY s.signal_date DESC,s.id DESC LIMIT 30""", (f"{WEEKLY_BRAKE_ENGINE_VERSION}:%",))]
         settings = {r["key"]: json.loads(r["value_json"]) for r in con.execute("SELECT * FROM portfolio_settings")}
         bars = con.execute("SELECT COUNT(*) n FROM bars").fetchone()["n"]
         strategy_version = con.execute("SELECT version FROM strategy_versions ORDER BY id DESC LIMIT 1").fetchone()[0]
@@ -662,6 +683,62 @@ def rsi_wilder(closes: list[float], period: int = 14) -> list[float | None]:
     return out
 
 
+def weekly_brake_events(daily_bars: list[dict[str, Any]], daily_rows: list[dict[str, Any]],
+                        weekly_bars: list[dict[str, Any]], weekly_rows: list[dict[str, Any]],
+                        drawdown_pct: float = 21.0) -> list[dict[str, Any]]:
+    """Apply the requested mode switch: weekly AL during brake, daily SAT always.
+
+    The brake is confirmed on a completed daily close at or below the configured
+    drawdown from the latest daily SAT close. It ends on a subsequent daily SAT.
+    """
+    if drawdown_pct <= 0 or drawdown_pct >= 100:
+        raise ValueError("weekly brake drawdown must be between 0 and 100 percent")
+    daily_by_date = {str(row["date"]): row for row in daily_rows}
+    weekly_by_week: dict[tuple[int, int], dict[str, Any]] = {}
+    for bar, row in zip(weekly_bars, weekly_rows):
+        day = date.fromisoformat(str(bar["date"])[:10])
+        weekly_by_week[day.isocalendar()[:2]] = {**row, "source_date": str(bar["date"])[:10],
+                                                "close": float(bar["close"])}
+    daily_week_ends: dict[tuple[int, int], str] = {}
+    for bar in daily_bars:
+        day = date.fromisoformat(str(bar["date"])[:10])
+        daily_week_ends[day.isocalendar()[:2]] = str(bar["date"])[:10]
+
+    events: list[dict[str, Any]] = []
+    brake_active = False
+    last_daily_sat_price: float | None = None
+    for bar in daily_bars:
+        signal_date = str(bar["date"])[:10]
+        day = date.fromisoformat(signal_date)
+        key = day.isocalendar()[:2]
+        indicator = daily_by_date.get(signal_date, {})
+        close = float(bar["close"])
+        if (not brake_active and last_daily_sat_price is not None
+                and close <= last_daily_sat_price * (1.0 - drawdown_pct / 100.0)):
+            brake_active = True
+
+        if indicator.get("buy") and not brake_active:
+            events.append({"event": "buy_confirmed", "timeframe": "1D", "signal_date": signal_date,
+                           "close_price": close, "rsi": indicator.get("rsi"),
+                           "change_pct": indicator.get("buy_diff"), "brake_active": False})
+
+        daily_sat = bool(indicator.get("tp"))
+        if daily_sat:
+            events.append({"event": "take_profit_confirmed", "timeframe": "1D", "signal_date": signal_date,
+                           "close_price": close, "rsi": indicator.get("rsi"),
+                           "change_pct": indicator.get("tp_diff"), "brake_active": brake_active})
+            last_daily_sat_price = close
+            brake_active = False
+
+        weekly = weekly_by_week.get(key)
+        if (weekly and daily_week_ends.get(key) == signal_date and weekly.get("buy") and brake_active):
+            events.append({"event": "buy_confirmed", "timeframe": "1W",
+                           "signal_date": weekly["source_date"], "close_price": float(weekly.get("close", close)),
+                           "rsi": weekly.get("rsi"), "change_pct": weekly.get("buy_diff"),
+                           "brake_active": True})
+    return events
+
+
 def run_signals(asset_id: int, timeframe: str = "1D", notify_after: str | None = None) -> dict[str, Any]:
     with db() as con:
         rows = [dict(r) for r in con.execute("SELECT * FROM bars WHERE asset_id=? AND timeframe=? ORDER BY date", (asset_id, timeframe)).fetchall()]
@@ -706,6 +783,83 @@ def run_signals(asset_id: int, timeframe: str = "1D", notify_after: str | None =
     return {"created": n, "message": "Kapanmış mumlar BEKAPRSI AUTO kurallarıyla işlendi; aynı olay yinelenmez."}
 
 
+def run_weekly_brake_signals(asset_id: int, notify_after_daily: str | None = None,
+                             notify_after_weekly: str | None = None) -> dict[str, Any]:
+    with db() as con:
+        asset = con.execute("SELECT * FROM assets WHERE id=? AND enabled=1", (asset_id,)).fetchone()
+        if not asset:
+            raise HTTPException(404, "Varlık bulunamadı.")
+        daily_bars = [dict(row) for row in con.execute(
+            "SELECT date,open,high,low,close,volume FROM bars WHERE asset_id=? AND timeframe='1D' ORDER BY date", (asset_id,))]
+        weekly_bars = [dict(row) for row in con.execute(
+            "SELECT date,open,high,low,close,volume FROM bars WHERE asset_id=? AND timeframe='1W' ORDER BY date", (asset_id,))]
+
+    daily_calc = bekap_indicators.calculate(daily_bars, asset["symbol"], asset["market"])
+    weekly_calc = bekap_indicators.calculate(weekly_bars, asset["symbol"], asset["market"])
+    profile = daily_calc["profile"]
+    parameters = json.loads(asset["parameters_json"] or "{}")
+    drawdown_pct = float(parameters.get("weekly_brake_drawdown_pct", DEFAULT_CONFIG["weekly_brake_drawdown_pct"]))
+    events = weekly_brake_events(daily_bars, daily_calc["rows"], weekly_bars, weekly_calc["rows"], drawdown_pct)
+    fingerprint = hashlib.sha256(json.dumps(
+        {"profile": profile, "weekly_brake_drawdown_pct": drawdown_pct,
+         "engine": WEEKLY_BRAKE_ENGINE_VERSION}, sort_keys=True).encode()).hexdigest()[:10]
+    strategy_version = f"{WEEKLY_BRAKE_ENGINE_VERSION}:{daily_calc['version']}:{profile['ticker']}:{fingerprint}"
+    bars_by_timeframe = {"1D": daily_bars, "1W": weekly_bars}
+    created = 0
+
+    with db() as con:
+        existing = {row["event_key"] for row in con.execute(
+            "SELECT event_key FROM signals WHERE asset_id=? AND strategy_version LIKE ?",
+            (asset_id, f"{WEEKLY_BRAKE_ENGINE_VERSION}:%"))}
+        con.execute("UPDATE signals SET is_current=0 WHERE asset_id=? AND strategy_version LIKE ?",
+                    (asset_id, f"{WEEKLY_BRAKE_ENGINE_VERSION}:%"))
+        desired_keys = set()
+        for event in events:
+            timeframe = event["timeframe"]
+            series = bars_by_timeframe[timeframe]
+            signal_date = event["signal_date"]
+            index = next((i for i, bar in enumerate(series) if str(bar["date"])[:10] == signal_date), None)
+            execution = series[index + 1] if index is not None and index + 1 < len(series) else None
+            event_key = hashlib.sha256(
+                f"{asset['symbol']}|{timeframe}|{signal_date}|{event['event']}|{strategy_version}".encode()).hexdigest()
+            desired_keys.add(event_key)
+            fmt = lambda value: f"{float(value):.2f}".replace(".", ",") if value is not None else "—"
+            if event["event"] == "buy_confirmed":
+                reason = (f"BEKAPRSI alım teyidi: RSI dönüşü; "
+                          f"{'haftalık fren modu' if timeframe == '1W' else 'günlük mod'}; "
+                          f"fren eşiği %{fmt(drawdown_pct)} günlük kapanış düşüşü.")
+            else:
+                reason = ("BEKAPRSI kâr-al teyidi: günlük SAT; haftalık fren sona erer."
+                          if event["brake_active"] else "BEKAPRSI kâr-al teyidi: günlük SAT.")
+            payload = {"symbol": asset["symbol"], **event, "reason": reason,
+                       "strategy_version": strategy_version, "profile": profile,
+                       "weekly_brake_drawdown_pct": drawdown_pct,
+                       "indicator_version": daily_calc["version"]}
+            con.execute("""INSERT INTO signals(event_key,asset_id,event,timeframe,signal_date,confirmed_at,
+                close_price,execution_date,execution_price,rsi,reason,strategy_version,payload_json,is_current)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+                ON CONFLICT(event_key) DO UPDATE SET close_price=excluded.close_price,
+                execution_date=excluded.execution_date,execution_price=excluded.execution_price,
+                rsi=excluded.rsi,reason=excluded.reason,payload_json=excluded.payload_json,is_current=1""",
+                (event_key, asset_id, event["event"], timeframe, signal_date, now(), event["close_price"],
+                 execution["date"] if execution else None, float(execution["open"]) if execution else None,
+                 event["rsi"], reason, strategy_version, json.dumps(payload, ensure_ascii=False)))
+            if event_key not in existing:
+                created += 1
+            notify_after = notify_after_daily if timeframe == "1D" else notify_after_weekly
+            if notify_after and signal_date > notify_after:
+                signal_id = con.execute("SELECT id FROM signals WHERE event_key=?", (event_key,)).fetchone()[0]
+                con.execute("INSERT OR IGNORE INTO outbox(event_key,signal_id,created_at) VALUES(?,?,?)",
+                            (event_key, signal_id, now()))
+
+        stale_keys = existing - desired_keys
+        for key in stale_keys:
+            con.execute("DELETE FROM outbox WHERE event_key=? AND status='pending'", (key,))
+
+    return {"created": created, "message": "Haftalık frenli AL / günlük SAT kuralları uygulandı.",
+            "weekly_brake_drawdown_pct": drawdown_pct, "signals": len(events)}
+
+
 @app.post("/api/assets/{asset_id}/bars")
 async def upload_bars(asset_id: int, request: Request, timeframe: str = "1D") -> dict[str, Any]:
     if timeframe not in ("1D", "1W"): raise HTTPException(400, "timeframe 1D veya 1W olmalı")
@@ -729,11 +883,12 @@ async def upload_bars(asset_id: int, request: Request, timeframe: str = "1D") ->
                 v = float(r["volume"]) if r.get("volume", "").strip() else None
                 con.execute("INSERT OR REPLACE INTO bars(asset_id,timeframe,date,open,high,low,close,volume) VALUES(?,?,?,?,?,?,?,?)",
                             (asset_id,timeframe,d.isoformat(),o,h,l,c,v)); count += 1
-        result = run_signals(asset_id, timeframe, notify_after=prior_date)
         if timeframe == "1D":
             rebuild_weekly_bars(asset_id)
-            weekly = run_signals(asset_id, "1W", notify_after=prior_week_date)
-            result["weekly_signals_created"] = weekly["created"]
+        result = run_weekly_brake_signals(
+            asset_id,
+            notify_after_daily=prior_date if timeframe == "1D" else None,
+            notify_after_weekly=prior_week_date)
         return {"rows_imported": count, **result}
     except HTTPException: raise
     except Exception as e: raise HTTPException(400, f"CSV okunamadı: {e}")
@@ -742,13 +897,34 @@ async def upload_bars(asset_id: int, request: Request, timeframe: str = "1D") ->
 @app.get("/api/assets/{asset_id}/signals")
 def asset_signals(asset_id: int) -> list[dict[str, Any]]:
     with db() as con:
-        return [dict(r) for r in con.execute("SELECT * FROM signals WHERE asset_id=? ORDER BY signal_date DESC", (asset_id,))]
+        asset = con.execute("SELECT symbol,market,role,currency FROM assets WHERE id=?", (asset_id,)).fetchone()
+        if not asset:
+            raise HTTPException(404, "Varlık bulunamadı.")
+        signals = [dict(r) for r in con.execute(
+            "SELECT * FROM signals WHERE asset_id=? AND is_current=1 AND strategy_version LIKE ? ORDER BY signal_date DESC,id DESC",
+            (asset_id, f"{WEEKLY_BRAKE_ENGINE_VERSION}:%"))]
+        bars = {timeframe: [dict(r) for r in con.execute(
+            "SELECT date,open,high,low,close,volume FROM bars WHERE asset_id=? AND timeframe=? ORDER BY date",
+            (asset_id, timeframe))] for timeframe in ("1D", "1W")}
+    adx_by_timeframe: dict[str, dict[str, float | None]] = {}
+    for timeframe, values in bars.items():
+        if len(values) >= 16:
+            calculated = bekap_indicators.calculate(values, asset["symbol"], asset["market"])["rows"]
+            adx_by_timeframe[timeframe] = {row["date"]: row["adx"] for row in calculated}
+    for signal in signals:
+        signal["symbol"] = asset["symbol"]
+        signal["role"] = asset["role"]
+        signal["currency"] = asset["currency"]
+        signal["adx"] = adx_by_timeframe.get(signal["timeframe"], {}).get(signal["signal_date"])
+    return signals
 
 
 @app.get("/api/telegram/preview")
 def telegram_preview() -> dict[str, Any]:
     with db() as con:
-        row = con.execute("SELECT s.*,a.symbol,a.currency FROM signals s JOIN assets a ON a.id=s.asset_id ORDER BY s.id DESC LIMIT 1").fetchone()
+        row = con.execute("SELECT s.*,a.symbol,a.currency FROM signals s JOIN assets a ON a.id=s.asset_id "
+                           "WHERE s.is_current=1 AND s.strategy_version LIKE ? ORDER BY s.id DESC LIMIT 1",
+                           (f"{WEEKLY_BRAKE_ENGINE_VERSION}:%",)).fetchone()
     if not row: return {"configured": False, "message": "Henüz sinyal yok. Telegram gönderimi bot token/chat id ortam değişkenleri ayarlanana kadar kapalı.", "preview": None}
     r = dict(row)
     number = lambda value: f"{float(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if value is not None else "—"
@@ -761,7 +937,7 @@ def telegram_preview() -> dict[str, Any]:
            f"Sinyal fiyatı: {number(r['close_price'])} {r['currency']} · Tahmini işlem fiyatı: {execution}\n"
            f"Göreli güç endeksi (RSI): {number(r['rsi'])}\nSinyal nedeni: {r['reason']}\n"
            f"Veri tarihi: {signal_date} · Kural sürümü: {r['strategy_version']}\n"
-           f"Grafik: {os.environ.get('BEKAP_PUBLIC_BASE_URL','http://127.0.0.1:8766')}/?asset={r['asset_id']}")
+           f"Grafik: {os.environ.get('BEKAP_PUBLIC_BASE_URL','http://127.0.0.1:8767')}/?asset={r['asset_id']}")
     return {"configured": bool(os.environ.get("BEKAP_TELEGRAM_BOT_TOKEN") and os.environ.get("BEKAP_TELEGRAM_CHAT_ID")), "preview": msg,
             "delivery": "disabled until explicit deployment configuration"}
 

@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#0b1016"><title>BEKAP · Sinyal Araştırma Masası</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/signals.css?v=3">
 </head>
 <body>
   <header class="topbar">
@@ -45,14 +47,12 @@
           <details class="history-details" id="signal-history"><summary>Seçili varlığın sinyal geçmişi <span>Ayrıntıları aç</span></summary><div id="detailSignals" class="detail-list"></div></details>
         </div>
         <aside class="signal-inspector" id="signal-panel">
-          <div class="inspector-head"><div><p class="eyebrow">SİNYAL İNCELEMESİ</p><h2>Son teyitli olay</h2></div><div class="inspector-pills"><span class="inspector-count"><b id="signalCount">0</b> olay</span><span class="timeframe-pill">GÜNLÜK</span></div></div>
-          <div id="signals" class="signal-list"><div class="empty">Kapanmış mum verisi hazırlanıyor.</div></div>
-          <div class="inspector-divider"></div>
-          <div class="inspector-stats"><div><small>GÖRELİ GÜÇ (RSI)</small><b id="inspectorRsi">—</b></div><div><small>TREND GÜCÜ (ADX)</small><b id="inspectorAdx">—</b></div></div>
-          <div class="rsi-history"><div><small>Geçmiş AL dönüş RSI min–maks</small><b id="rsiHistoryBuy">—</b></div><div><small>Geçmiş SAT dönüş RSI min–maks</small><b id="rsiHistorySell">—</b></div></div>
-          <div class="inspector-divider"></div>
-          <div class="rule-summary"><p class="eyebrow">AKTİF KURAL ÖZETİ</p><div><span>Alım eşiği</span><b id="buyThreshold">—</b></div><div><span>Kâr-al eşiği</span><b id="sellThreshold">—</b></div><div><span>Haftalık moda geçiş</span><b>−21,00%</b></div><div><span>Günlük moda dönüş</span><b>Günlük KÂR AL</b></div></div>
-          <a class="all-signals" href="#signal-history">Sinyal geçmişini incele <span>↗</span></a>
+          <div class="signal-table-heading">
+            <div><p class="eyebrow">PİYASA TARAMASI</p><h2>Son teyitli sinyaller</h2><p class="signal-table-sub">Sepetteki teyitli AL / SAT olayları</p></div>
+            <div class="signal-table-tools"><span class="signal-table-count"><b id="signalCount">0</b> sinyal</span><select id="signalFilter" aria-label="Sinyal türüne göre filtrele"><option value="ALL">Tüm sinyaller</option><option value="AL">AL</option><option value="SAT">SAT</option></select><button class="secondary" id="signalRefresh" type="button">⟳ Yenile</button></div>
+          </div>
+          <div class="signal-table-wrap"><table class="signal-table"><thead><tr><th>Varlık</th><th>Aralık</th><th>Sinyal</th><th>Tarih</th></tr></thead><tbody id="signals"><tr><td colspan="4" class="empty">Sinyaller yükleniyor…</td></tr></tbody></table></div>
+          <div class="signal-table-footer"><span>Son tarama <b id="signalUpdated">—</b></span><span>Yalnızca teyitli AL / SAT olayları · emir göndermez</span></div>
         </aside>
       </section>
 
@@ -75,5 +75,5 @@
   </div>
 
   <dialog id="assetDialog"><form id="assetForm"><div class="dialoghead"><div><p class="eyebrow">SEPET SÖZLEŞMESİ</p><h2>Varlık ekle</h2></div><button type="button" class="x" id="closeDialog" aria-label="Kapat">×</button></div><div class="formgrid"><label>Sembol<input name="symbol" placeholder="örn. AAPL" required maxlength="32"></label><label>Piyasa<input name="market" placeholder="NASDAQ / BIST / KRİPTO" required></label><label>Portföy rolü<select name="role"><option value="lifetime">Ömürlük · kısmi kâr satışı</option><option value="trend">Trend · tam çıkış</option><option value="periodic">Dönemsel · tam çıkış</option></select></label><label>Para birimi<input name="currency" value="USD" required maxlength="8"></label><label>Hedef ağırlık (%)<input name="target_weight" type="text" inputmode="decimal" value="0,00"></label><label>Üst ağırlık (%)<input name="max_weight" type="text" inputmode="decimal" value="0,00"></label><label class="wide">Grafik sağlayıcı sembolü<input name="tv_symbol" placeholder="NASDAQ:AAPL"></label><label>RSI dönemi<input name="rsi_period" type="text" inputmode="decimal" value="14,00"></label><label>Alım bölgesi üst sınırı<input name="buy_zone_max" type="text" inputmode="decimal" value="35,00"></label><label class="wide">Haftalık moda geçiş düşüşü (%)<input name="weekly_brake_drawdown_pct" type="text" inputmode="decimal" value="21,00"></label></div><p class="muted">Varlık ve strateji parametreleri kaydedilir. Otomatik emir veya yeniden dengeleme yapılmaz.</p><div class="dialogactions"><button type="button" class="secondary" id="cancelDialog">Vazgeç</button><button class="primary">Sepete ekle</button></div></form></dialog>
-  <script src="/static/vendor/lightweight-charts.js"></script><script src="/static/chart.js"></script><script src="/static/app.js"></script>
+  <script src="/static/vendor/lightweight-charts.js"></script><script src="/static/chart.js?v=2"></script><script src="/static/app.js?v=3"></script>
 </body></html>
