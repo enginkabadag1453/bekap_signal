@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const $ = s => document.querySelector(s);
-  const chartState = { instance: null, data: null };
+  const chartState = { instance: null, data: null, axisObserver: null };
   const COLORS = { price: '#ffe55d', upper: '#00aaf0', lower: '#00aaf0', basis: '#f47b17', ema: '#ffa500', buy: '#42b765', sell: '#ff4d55', rsi: '#3678ff', adx: '#ff9900', up: '#118b77', down: '#a64254' };
   const n = value => value == null || !Number.isFinite(Number(value)) ? '—' : Number(value).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const dateText = value => {
@@ -110,6 +110,7 @@
         rows[i].sma200 = bars.slice(i - 199, i + 1).reduce((sum, bar) => sum + Number(bar.close), 0) / 200;
       }
     }
+    if (chartState.axisObserver) { chartState.axisObserver.disconnect(); chartState.axisObserver = null; }
     if (chartState.instance) { chartState.instance.remove(); chartState.instance = null; }
     host.replaceChildren();
     const chart = LightweightCharts.createChart(host, {
@@ -172,7 +173,7 @@
     LightweightCharts.createSeriesMarkers(main, markers.slice(-500));
 
     const rsiLine = addLine(chart, rows, 'rsi', COLORS.rsi, 1, {
-      lineWidth: 1, lastValueVisible: true, autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } })
+      lineWidth: 1, lastValueVisible: false, priceLineVisible: false, autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } })
     });
     const matchedBuy = Number(p.buy ?? 40), matchedSell = Number(p.tp ?? 65);
     const matchedOverbought = Number(p.overbought ?? 70);
@@ -198,7 +199,7 @@
     const lastSellZoneRsi = drawRsiZone(matchedSell, true, COLORS.sell);
     const lastBuyZoneRsi = drawRsiZone(matchedBuy, false, COLORS.buy);
     // RSI and ADX intentionally share the same lower pane, as in the supplied Pine indicator.
-    const adx = addLine(chart, rows, 'adx', COLORS.adx, 1, { lineWidth: 2, lastValueVisible: true, autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) });
+    const adx = addLine(chart, rows, 'adx', COLORS.adx, 1, { lineWidth: 2, lastValueVisible: false, priceLineVisible: false, autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) });
     adx.attachPrimitive(new RegionFill(rows, 'adx', 25, false, false));
     const staticLevels = [
       { value: matchedOverbought, color: 'rgba(255,77,85,.5)', style: LightweightCharts.LineStyle.Dashed, width: 2 },
@@ -209,15 +210,15 @@
     ];
     for (const level of staticLevels) rsiLine.createPriceLine({
       price: level.value, color: level.color, lineStyle: level.style, lineWidth: level.width,
-      axisLabelVisible: Boolean(level.label), title: ''
+      axisLabelVisible: false, title: ''
     });
     if (lastSellZoneRsi != null) rsiLine.createPriceLine({
       price: lastSellZoneRsi, color: COLORS.sell, lineStyle: LightweightCharts.LineStyle.LargeDashed,
-      lineWidth: 2, axisLabelVisible: true, title: ''
+      lineWidth: 2, axisLabelVisible: false, title: ''
     });
     if (lastBuyZoneRsi != null) rsiLine.createPriceLine({
       price: lastBuyZoneRsi, color: COLORS.buy, lineStyle: LightweightCharts.LineStyle.LargeDashed,
-      lineWidth: 2, axisLabelVisible: true, title: ''
+      lineWidth: 2, axisLabelVisible: false, title: ''
     });
     const latestIndicator = rows.at(-1);
     if (latestIndicator?.rsi != null) rsiLine.createPriceLine({ price: Number(latestIndicator.rsi), color: 'rgba(54,120,255,.32)', lineStyle: LightweightCharts.LineStyle.Dotted, lineWidth: 1, axisLabelVisible: false, title: '' });
@@ -232,6 +233,78 @@
     if ($('#rsiHistorySell')) $('#rsiHistorySell').textContent = historyRanges.sell ? `${n(historyRanges.sell[0])} – ${n(historyRanges.sell[1])}` : 'Yeterli SAT dönüşü yok';
     const indicatorLegend = $('#indicatorLegend');
     if (indicatorLegend) indicatorLegend.innerHTML = `<span class="legend-muted"><b>BEKAPTREND</b> · RSI(14) · ADX(14)</span><span class="legend-sell">Son SAT bölgesi <b>${n(lastSellZoneRsi)}</b></span><span class="legend-rsi">RSI <b>${n(latestIndicator?.rsi)}</b></span><span class="legend-buy">Son AL bölgesi <b>${n(lastBuyZoneRsi)}</b></span><span class="legend-sell">RSI 25 <b>25,00</b></span><span class="legend-adx">ADX <b>${n(latestIndicator?.adx)}</b></span>`;
+    const indicatorLabels = [
+      { text: '70,00', value: matchedOverbought, color: COLORS.sell },
+      { text: 'SAT', value: matchedSell, color: COLORS.basis },
+      { text: '50,00', value: 50, color: '#aeb7b2' },
+      { text: 'AL', value: matchedBuy, color: COLORS.buy },
+      { text: '25,00', value: 25, color: COLORS.sell },
+      { text: n(lastSellZoneRsi), value: lastSellZoneRsi, color: COLORS.sell },
+      { text: n(latestIndicator?.rsi), value: latestIndicator?.rsi, color: COLORS.rsi },
+      { text: n(lastBuyZoneRsi), value: lastBuyZoneRsi, color: COLORS.buy },
+      { text: n(latestIndicator?.adx), value: latestIndicator?.adx, color: COLORS.adx }
+    ].filter(item => item.value != null && Number.isFinite(Number(item.value)));
+    const axisLayer = document.createElement('div');
+    axisLayer.className = 'indicator-axis-layer';
+    axisLayer.setAttribute('aria-hidden', 'true');
+    const axisConnectors = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    axisConnectors.classList.add('indicator-axis-connectors');
+    axisLayer.append(axisConnectors);
+    host.append(axisLayer);
+    const axisTags = indicatorLabels.map(item => {
+      const tag = document.createElement('span');
+      tag.className = 'indicator-axis-tag';
+      tag.textContent = item.text;
+      tag.style.setProperty('--axis-color', item.color);
+      axisLayer.append(tag);
+      return { ...item, tag, actualY: 0, labelY: 0 };
+    });
+    const positionAxisTags = () => {
+      const pane = chart.panes()[1];
+      const paneElement = pane?.getHTMLElement?.();
+      if (!paneElement || !host.isConnected) return;
+      const hostRect = host.getBoundingClientRect(), paneRect = paneElement.getBoundingClientRect();
+      const paneTop = paneRect.top - hostRect.top, paneHeight = paneRect.height;
+      if (paneHeight <= 0) return;
+      axisLayer.style.top = `${paneTop}px`;
+      axisLayer.style.height = `${paneHeight}px`;
+      axisConnectors.setAttribute('viewBox', `0 0 ${host.clientWidth} ${paneHeight}`);
+      axisConnectors.replaceChildren();
+      const placed = axisTags.map(item => {
+        const coordinate = rsiLine.priceToCoordinate(Number(item.value));
+        return { ...item, actualY: coordinate == null ? null : coordinate, labelY: coordinate == null ? null : coordinate };
+      }).filter(item => item.actualY != null).sort((a, b) => a.actualY - b.actualY);
+      const gap = 17, inset = 9;
+      for (let i = 0; i < placed.length; i++) {
+        const item = placed[i];
+        item.labelY = Math.max(inset, item.actualY);
+        if (i > 0) item.labelY = Math.max(item.labelY, placed[i - 1].labelY + gap);
+      }
+      if (placed.length && placed.at(-1).labelY > paneHeight - inset) {
+        const shift = placed.at(-1).labelY - (paneHeight - inset);
+        for (const item of placed) item.labelY -= shift;
+      }
+      for (const item of placed) {
+        item.tag.style.top = `${item.labelY}px`;
+        const offset = Math.abs(item.labelY - item.actualY) > 3;
+        item.tag.classList.toggle('is-offset', offset);
+        item.tag.title = Math.abs(item.labelY - item.actualY) > 3 ? `Gerçek gösterge seviyesi: ${n(item.value)}` : item.text;
+        if (offset) {
+          const tagLeft = host.clientWidth - item.tag.getBoundingClientRect().width;
+          const elbowX = Math.max(host.clientWidth - 54, tagLeft - 8);
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', `M ${elbowX} ${item.actualY} H ${tagLeft - 4} V ${item.labelY}`);
+          path.setAttribute('stroke', item.color);
+          axisConnectors.append(path);
+        }
+      }
+    };
+    requestAnimationFrame(positionAxisTags);
+    chartState.axisObserver = new ResizeObserver(() => requestAnimationFrame(positionAxisTags));
+    chartState.axisObserver.observe(host);
+    const indicatorPane = chart.panes()[1]?.getHTMLElement?.();
+    if (indicatorPane) chartState.axisObserver.observe(indicatorPane);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(() => requestAnimationFrame(positionAxisTags));
     LightweightCharts.createSeriesMarkers(rsiLine, rows.filter(r => r.cross_up || r.cross_down).map(r => ({
       time: r.date, position: 'atPriceMiddle', price: r.rsi, shape: r.cross_up ? 'arrowUp' : 'arrowDown', color: '#111111', size: 1
     })), { autoScale: false });
@@ -253,8 +326,8 @@
 
     const panes = chart.panes();
     // Stretch factors set stable pane proportions; setHeight() is only a one-time redistribution hint.
-    if (panes[0]) panes[0].setStretchFactor(70);
-    if (panes[1]) panes[1].setStretchFactor(30);
+    if (panes[0]) panes[0].setStretchFactor(60);
+    if (panes[1]) panes[1].setStretchFactor(40);
     const range = $('#chartRange')?.value || '1Y';
     setRange(range);
 
