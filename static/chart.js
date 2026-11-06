@@ -234,7 +234,6 @@
     const indicatorLegend = $('#indicatorLegend');
     if (indicatorLegend) indicatorLegend.innerHTML = `<span class="legend-muted"><b>BEKAPTREND</b> · RSI(14) · ADX(14)</span><span class="legend-sell">Son SAT bölgesi <b>${n(lastSellZoneRsi)}</b></span><span class="legend-rsi">RSI <b>${n(latestIndicator?.rsi)}</b></span><span class="legend-buy">Son AL bölgesi <b>${n(lastBuyZoneRsi)}</b></span><span class="legend-sell">RSI 25 <b>25,00</b></span><span class="legend-adx">ADX <b>${n(latestIndicator?.adx)}</b></span>`;
     const indicatorLabels = [
-      { text: n(matchedSell), value: matchedSell, color: COLORS.basis },
       { text: '25,00', value: 25, color: COLORS.sell },
       { text: n(lastSellZoneRsi), value: lastSellZoneRsi, color: COLORS.sell },
       { text: n(latestIndicator?.rsi), value: latestIndicator?.rsi, color: COLORS.rsi },
@@ -244,6 +243,13 @@
     const axisLayer = document.createElement('div');
     axisLayer.className = 'indicator-axis-layer';
     axisLayer.setAttribute('aria-hidden', 'true');
+    const axisMasks = [60, 40, 20].map(value => {
+      const mask = document.createElement('span');
+      mask.className = 'indicator-axis-mask';
+      mask.dataset.value = String(value);
+      axisLayer.append(mask);
+      return mask;
+    });
     const axisConnectors = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     axisConnectors.classList.add('indicator-axis-connectors');
     axisLayer.append(axisConnectors);
@@ -265,6 +271,11 @@
       if (paneHeight <= 0) return;
       axisLayer.style.top = `${paneTop}px`;
       axisLayer.style.height = `${paneHeight}px`;
+      axisLayer.style.setProperty('--axis-pane-bg', bg);
+      for (const mask of axisMasks) {
+        const coordinate = rsiLine.priceToCoordinate(Number(mask.dataset.value));
+        if (coordinate != null) mask.style.top = `${coordinate}px`;
+      }
       axisConnectors.setAttribute('viewBox', `0 0 ${host.clientWidth} ${paneHeight}`);
       axisConnectors.replaceChildren();
       const placed = axisTags.map(item => {
