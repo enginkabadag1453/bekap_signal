@@ -235,9 +235,9 @@
     if (indicatorLegend) indicatorLegend.innerHTML = `<span class="legend-muted"><b>BEKAPTREND</b> · RSI(14) · ADX(14)</span><span class="legend-sell">Son SAT bölgesi <b>${n(lastSellZoneRsi)}</b></span><span class="legend-rsi">RSI <b>${n(latestIndicator?.rsi)}</b></span><span class="legend-buy">Son AL bölgesi <b>${n(lastBuyZoneRsi)}</b></span><span class="legend-sell">RSI 25 <b>25,00</b></span><span class="legend-adx">ADX <b>${n(latestIndicator?.adx)}</b></span>`;
     const indicatorLabels = [
       { text: '70,00', value: matchedOverbought, color: COLORS.sell },
-      { text: 'SAT', value: matchedSell, color: COLORS.basis },
+      { text: n(matchedSell), value: matchedSell, color: COLORS.basis },
       { text: '50,00', value: 50, color: '#aeb7b2' },
-      { text: 'AL', value: matchedBuy, color: COLORS.buy },
+      { text: n(matchedBuy), value: matchedBuy, color: COLORS.buy },
       { text: '25,00', value: 25, color: COLORS.sell },
       { text: n(lastSellZoneRsi), value: lastSellZoneRsi, color: COLORS.sell },
       { text: n(latestIndicator?.rsi), value: latestIndicator?.rsi, color: COLORS.rsi },
