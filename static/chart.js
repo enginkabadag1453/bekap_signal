@@ -174,34 +174,54 @@
     const rsiLine = addLine(chart, rows, 'rsi', COLORS.rsi, 1, {
       lineWidth: 1, lastValueVisible: true, autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } })
     });
-    for (const [threshold, isAbove, color] of [[65, true, COLORS.sell], [40, false, COLORS.buy]]) {
+    const matchedBuy = Number(p.buy ?? 40), matchedSell = Number(p.tp ?? 65);
+    const matchedOverbought = Number(p.overbought ?? 70);
+    const drawRsiZone = (threshold, isAbove, color) => {
+      const segments = [];
       let segment = [];
-      const flush = () => {
-        if (!segment.length) return;
-        const line = chart.addSeries(LightweightCharts.LineSeries, { color, lineWidth: 3, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 1);
-        line.setData(segment); segment = [];
-      };
+      const flush = () => { if (segment.length) segments.push(segment); segment = []; };
       for (const r of rows) {
-        if (r.rsi != null && (isAbove ? r.rsi >= threshold : r.rsi <= threshold)) segment.push({ time: r.date, value: r.rsi });
+        if (r.rsi != null && (isAbove ? r.rsi >= threshold : r.rsi <= threshold)) segment.push({ time: r.date, value: Number(r.rsi) });
         else flush();
       }
       flush();
-    }
-    // Keep ADX on its own pane and scale so it cannot collide with similarly-valued RSI levels.
-    const adx = addLine(chart, rows, 'adx', COLORS.adx, 2, { lineWidth: 2, lastValueVisible: false, autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) });
+      segments.forEach(points => {
+        const line = chart.addSeries(LightweightCharts.LineSeries, {
+          color, lineWidth: 3, priceLineVisible: false,
+          lastValueVisible: false, crosshairMarkerVisible: false
+        }, 1);
+        line.setData(points);
+      });
+      return segments.at(-1)?.at(-1)?.value ?? null;
+    };
+    // BEKAPTREND plots the last qualifying RSI point from each colored region on the scale.
+    const lastSellZoneRsi = drawRsiZone(matchedSell, true, COLORS.sell);
+    const lastBuyZoneRsi = drawRsiZone(matchedBuy, false, COLORS.buy);
+    // RSI and ADX intentionally share the same lower pane, as in the supplied Pine indicator.
+    const adx = addLine(chart, rows, 'adx', COLORS.adx, 1, { lineWidth: 2, lastValueVisible: true, autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) });
     adx.attachPrimitive(new RegionFill(rows, 'adx', 25, false, false));
-    const matchedBuy = Number(p.buy ?? 40), matchedSell = Number(p.tp ?? 65);
-    for (const value of [30, 40, 50, 70, 80]) {
-      if (value === matchedBuy || value === matchedSell) continue;
-      rsiLine.createPriceLine({ price: value, color: 'rgba(153,163,173,.34)', lineStyle: LightweightCharts.LineStyle.Dotted, lineWidth: 1, axisLabelVisible: false, title: '' });
-    }
-    // Labels live in a compact legend instead of stacking on the price scale.
-    rsiLine.createPriceLine({ price: matchedBuy, color: COLORS.buy, lineStyle: LightweightCharts.LineStyle.Dashed, lineWidth: 2, axisLabelVisible: false, title: '' });
-    rsiLine.createPriceLine({ price: matchedSell, color: COLORS.sell, lineStyle: LightweightCharts.LineStyle.Dashed, lineWidth: 2, axisLabelVisible: false, title: '' });
-    adx.createPriceLine({ price: 25, color: 'rgba(255,153,0,.8)', lineStyle: LightweightCharts.LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false, title: '' });
+    const staticLevels = [
+      { value: matchedOverbought, color: 'rgba(255,77,85,.5)', style: LightweightCharts.LineStyle.Dashed, width: 2 },
+      { value: matchedSell, color: 'rgba(255,153,0,.55)', style: LightweightCharts.LineStyle.Dotted, width: 1 },
+      { value: 50, color: 'rgba(153,163,173,.55)', style: LightweightCharts.LineStyle.Solid, width: 1 },
+      { value: matchedBuy, color: 'rgba(66,183,101,.58)', style: LightweightCharts.LineStyle.Dashed, width: 2 },
+      { value: 25, color: COLORS.sell, style: LightweightCharts.LineStyle.Solid, width: 1, label: true }
+    ];
+    for (const level of staticLevels) rsiLine.createPriceLine({
+      price: level.value, color: level.color, lineStyle: level.style, lineWidth: level.width,
+      axisLabelVisible: Boolean(level.label), title: ''
+    });
+    if (lastSellZoneRsi != null) rsiLine.createPriceLine({
+      price: lastSellZoneRsi, color: COLORS.sell, lineStyle: LightweightCharts.LineStyle.LargeDashed,
+      lineWidth: 2, axisLabelVisible: true, title: ''
+    });
+    if (lastBuyZoneRsi != null) rsiLine.createPriceLine({
+      price: lastBuyZoneRsi, color: COLORS.buy, lineStyle: LightweightCharts.LineStyle.LargeDashed,
+      lineWidth: 2, axisLabelVisible: true, title: ''
+    });
     const latestIndicator = rows.at(-1);
     if (latestIndicator?.rsi != null) rsiLine.createPriceLine({ price: Number(latestIndicator.rsi), color: 'rgba(54,120,255,.32)', lineStyle: LightweightCharts.LineStyle.Dotted, lineWidth: 1, axisLabelVisible: false, title: '' });
-    if (latestIndicator?.adx != null) adx.createPriceLine({ price: Number(latestIndicator.adx), color: 'rgba(255,153,0,.34)', lineStyle: LightweightCharts.LineStyle.Dotted, lineWidth: 1, axisLabelVisible: false, title: '' });
+    if (latestIndicator?.adx != null) rsiLine.createPriceLine({ price: Number(latestIndicator.adx), color: 'rgba(255,153,0,.34)', lineStyle: LightweightCharts.LineStyle.Dotted, lineWidth: 1, axisLabelVisible: false, title: '' });
     const buyRsi = rows.filter(r => r.buy && Number.isFinite(Number(r.rsi))).map(r => Number(r.rsi));
     const sellRsi = rows.filter(r => r.tp && Number.isFinite(Number(r.rsi))).map(r => Number(r.rsi));
     const historyRanges = {
@@ -211,7 +231,7 @@
     if ($('#rsiHistoryBuy')) $('#rsiHistoryBuy').textContent = historyRanges.buy ? `${n(historyRanges.buy[0])} – ${n(historyRanges.buy[1])}` : 'Yeterli AL dönüşü yok';
     if ($('#rsiHistorySell')) $('#rsiHistorySell').textContent = historyRanges.sell ? `${n(historyRanges.sell[0])} – ${n(historyRanges.sell[1])}` : 'Yeterli SAT dönüşü yok';
     const indicatorLegend = $('#indicatorLegend');
-    if (indicatorLegend) indicatorLegend.innerHTML = `<span class="legend-rsi">RSI <b>${n(latestIndicator?.rsi)}</b></span><span class="legend-buy">AL eşiği <b>${n(matchedBuy)}</b></span><span class="legend-sell">SAT eşiği <b>${n(matchedSell)}</b></span><span class="legend-adx">ADX <b>${n(latestIndicator?.adx)}</b> · eşik 25</span><span class="legend-muted">30 · 50 · 70 · 80 seviyeleri grafikte</span>`;
+    if (indicatorLegend) indicatorLegend.innerHTML = `<span class="legend-muted"><b>BEKAPTREND</b> · RSI(14) · ADX(14)</span><span class="legend-sell">Son SAT bölgesi <b>${n(lastSellZoneRsi)}</b></span><span class="legend-rsi">RSI <b>${n(latestIndicator?.rsi)}</b></span><span class="legend-buy">Son AL bölgesi <b>${n(lastBuyZoneRsi)}</b></span><span class="legend-sell">RSI 25 <b>25,00</b></span><span class="legend-adx">ADX <b>${n(latestIndicator?.adx)}</b></span>`;
     LightweightCharts.createSeriesMarkers(rsiLine, rows.filter(r => r.cross_up || r.cross_down).map(r => ({
       time: r.date, position: 'atPriceMiddle', price: r.rsi, shape: r.cross_up ? 'arrowUp' : 'arrowDown', color: '#111111', size: 1
     })), { autoScale: false });
@@ -233,9 +253,8 @@
 
     const panes = chart.panes();
     // Stretch factors set stable pane proportions; setHeight() is only a one-time redistribution hint.
-    if (panes[0]) panes[0].setStretchFactor(60);
-    if (panes[1]) panes[1].setStretchFactor(26);
-    if (panes[2]) panes[2].setStretchFactor(14);
+    if (panes[0]) panes[0].setStretchFactor(70);
+    if (panes[1]) panes[1].setStretchFactor(30);
     const range = $('#chartRange')?.value || '1Y';
     setRange(range);
 
