@@ -3,6 +3,7 @@
   const $ = s => document.querySelector(s);
   const chartState = { instance: null, data: null, axisObserver: null };
   const COLORS = { price: '#ffe55d', upper: '#00aaf0', lower: '#00aaf0', basis: '#f47b17', ema: '#ffa500', buy: '#42b765', sell: '#ff4d55', rsi: '#3678ff', adx: '#ff9900', up: '#118b77', down: '#a64254' };
+  const SIGNAL_BADGES = { buy: '#00e676', sell: '#ff1744' };
   const n = value => value == null || !Number.isFinite(Number(value)) ? '—' : Number(value).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const dateText = value => {
     if (!value) return '—';
@@ -160,8 +161,8 @@
     const markers = [];
     if (showSignals) {
       for (const r of rows) {
-        if (r.buy) markers.push({ time: r.date, position: 'belowBar', shape: 'arrowUp', color: COLORS.buy, text: `AL / EKLE (${r.buy_diff == null ? 'İlk' : `${r.buy_diff > 0 ? '+' : ''}${pct(r.buy_diff)}%`})`, size: 2 });
-        if (r.tp) markers.push({ time: r.date, position: 'aboveBar', shape: 'arrowDown', color: COLORS.sell, text: `SAT / KÂR AL (${r.tp_diff == null ? 'İlk' : `${r.tp_diff > 0 ? '+' : ''}${pct(r.tp_diff)}%`})`, size: 2 });
+        if (r.buy) markers.push({ time: r.date, position: 'belowBar', shape: 'arrowUp', color: SIGNAL_BADGES.buy, textColor: '#ffffff', text: `EKLE (${r.buy_diff == null ? 'İlk' : `${r.buy_diff > 0 ? '+' : ''}${pct(r.buy_diff)}%`})`, size: 2 });
+        if (r.tp) markers.push({ time: r.date, position: 'aboveBar', shape: 'arrowDown', color: SIGNAL_BADGES.sell, textColor: '#ffffff', text: `KÂR AL (${r.tp_diff == null ? 'İlk' : `${r.tp_diff > 0 ? '+' : ''}${pct(r.tp_diff)}%`})`, size: 2 });
       }
       for (const action of data.actions || []) {
         if (action.kind !== 'dividend') continue;
@@ -258,7 +259,9 @@
       const tag = document.createElement('span');
       tag.className = 'indicator-axis-tag';
       tag.textContent = item.text;
-      tag.style.setProperty('--axis-color', item.color);
+      const badgeColor = item.color === COLORS.buy ? SIGNAL_BADGES.buy : item.color === COLORS.sell ? SIGNAL_BADGES.sell : item.color;
+      tag.style.setProperty('--axis-color', badgeColor);
+      tag.style.setProperty('--axis-text-color', badgeColor === SIGNAL_BADGES.buy || badgeColor === SIGNAL_BADGES.sell ? '#ffffff' : '#071018');
       axisLayer.append(tag);
       return { ...item, tag, actualY: 0, labelY: 0 };
     });
