@@ -159,10 +159,12 @@
     chart.priceScale('volume').applyOptions({ visible: false, scaleMargins: { top: .86, bottom: 0 } });
 
     const markers = [];
+    const signalBadges = [];
     if (showSignals) {
       for (const r of rows) {
-        if (r.buy) markers.push({ time: r.date, position: 'belowBar', shape: 'arrowUp', color: SIGNAL_BADGES.buy, textColor: '#ffffff', text: `EKLE (${r.buy_diff == null ? 'İlk' : `${r.buy_diff > 0 ? '+' : ''}${pct(r.buy_diff)}%`})`, size: 2 });
-        if (r.tp) markers.push({ time: r.date, position: 'aboveBar', shape: 'arrowDown', color: SIGNAL_BADGES.sell, textColor: '#ffffff', text: `KÂR AL (${r.tp_diff == null ? 'İlk' : `${r.tp_diff > 0 ? '+' : ''}${pct(r.tp_diff)}%`})`, size: 2 });
+        const bar = bars.find(item => item.date === r.date);
+        if (r.buy && bar) signalBadges.push({ time: r.date, value: Number(bar.low), side: 'buy', text: `EKLE (${r.buy_diff == null ? 'İlk' : `${r.buy_diff > 0 ? '+' : ''}${pct(r.buy_diff)}%`})` });
+        if (r.tp && bar) signalBadges.push({ time: r.date, value: Number(bar.high), side: 'sell', text: `KÂR AL (${r.tp_diff == null ? 'İlk' : `${r.tp_diff > 0 ? '+' : ''}${pct(r.tp_diff)}%`})` });
       }
       for (const action of data.actions || []) {
         if (action.kind !== 'dividend') continue;
@@ -255,6 +257,17 @@
     axisConnectors.classList.add('indicator-axis-connectors');
     axisLayer.append(axisConnectors);
     host.append(axisLayer);
+    const signalLayer = document.createElement('div');
+    signalLayer.className = 'signal-badge-layer';
+    signalLayer.setAttribute('aria-hidden', 'true');
+    host.append(signalLayer);
+    const badgeElements = signalBadges.map(item => {
+      const badge = document.createElement('span');
+      badge.className = `signal-badge signal-badge-${item.side}`;
+      badge.textContent = item.text;
+      signalLayer.append(badge);
+      return { ...item, element: badge };
+    });
     const axisTags = indicatorLabels.map(item => {
       const tag = document.createElement('span');
       tag.className = 'indicator-axis-tag';
@@ -307,6 +320,23 @@
           path.setAttribute('d', `M ${elbowX} ${item.actualY} H ${tagLeft - 4} V ${item.labelY}`);
           path.setAttribute('stroke', item.color);
           axisConnectors.append(path);
+        }
+      }
+      const pricePane = chart.panes()[0]?.getHTMLElement?.();
+      if (pricePane) {
+        const pricePaneRect = pricePane.getBoundingClientRect();
+        const pricePaneTop = pricePaneRect.top - hostRect.top;
+        const pricePaneBottom = pricePaneTop + pricePaneRect.height;
+        for (const item of badgeElements) {
+          const x = chart.timeScale().timeToCoordinate(item.time);
+          const y = main.priceToCoordinate(item.value);
+          const absoluteY = y == null ? null : pricePaneTop + y;
+          const visible = x != null && absoluteY != null && x >= 0 && x <= host.clientWidth && absoluteY >= pricePaneTop && absoluteY <= pricePaneBottom;
+          item.element.style.display = visible ? 'block' : 'none';
+          if (visible) {
+            item.element.style.left = `${x}px`;
+            item.element.style.top = `${absoluteY - 6}px`;
+          }
         }
       }
     };
