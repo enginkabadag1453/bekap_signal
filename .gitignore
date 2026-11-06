@@ -1,5 +1,6 @@
 provider.env
 bekap.sqlite3*
+cache/logos/
 .env
 .env.*
 __pycache__/

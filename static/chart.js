@@ -14,7 +14,11 @@
     return new Intl.DateTimeFormat('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(d);
   };
   const pct = value => Number(value).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const filterTR = { NONE: 'filtre yok', ABOVE: '200 günlük ortalamanın üstünde', BELOW: '200 günlük ortalamanın altında' };
+  const weekdayTR = value => {
+    if (!value) return '—';
+    return new Intl.DateTimeFormat('tr-TR', { weekday: 'long' })
+      .format(new Date(`${String(value).slice(0, 10)}T12:00:00`)).toLocaleUpperCase('tr-TR');
+  };
 
   class RegionFill {
     constructor(rows, upperKey, lowerKey, step = false, positive = false) {
@@ -88,7 +92,6 @@
         if ($('#inspectorRsi')) $('#inspectorRsi').textContent = '—';
         if ($('#inspectorAdx')) $('#inspectorAdx').textContent = '—';
         host.innerHTML = `<div class="chartplaceholder">${data.error || 'Kapanmış mum verisi henüz yok.'}<br><small>Otomatik veri yenilemesi tamamlanınca grafiği aç.</small></div>`;
-        $('#chartMeta').textContent = data.source ? `Kaynak: ${data.source} · Veri bekleniyor` : 'İlk veri eşitlemesi bekleniyor';
         $('#detailSignals').textContent = 'Bu varlık için henüz kapanmış mum ve sinyal bulunmuyor.';
         return;
       }
@@ -237,8 +240,14 @@
     };
     if ($('#rsiHistoryBuy')) $('#rsiHistoryBuy').textContent = historyRanges.buy ? `${n(historyRanges.buy[0])} – ${n(historyRanges.buy[1])}` : 'Yeterli AL dönüşü yok';
     if ($('#rsiHistorySell')) $('#rsiHistorySell').textContent = historyRanges.sell ? `${n(historyRanges.sell[0])} – ${n(historyRanges.sell[1])}` : 'Yeterli SAT dönüşü yok';
+    const latestSignal = event => (data.strategy_signals || [])
+      .filter(signal => signal.event === event)
+      .sort((a, b) => String(a.signal_date).localeCompare(String(b.signal_date)))
+      .at(-1);
+    const lastSellSignal = latestSignal('take_profit_confirmed');
+    const lastBuySignal = latestSignal('buy_confirmed');
     const indicatorLegend = $('#indicatorLegend');
-    if (indicatorLegend) indicatorLegend.innerHTML = `<span class="legend-muted"><b>BEKAPTREND</b> · RSI(14) · ADX(14)</span><span class="legend-sell">Son SAT bölgesi <b>${n(lastSellZoneRsi)}</b></span><span class="legend-rsi">RSI <b>${n(latestIndicator?.rsi)}</b></span><span class="legend-buy">Son AL bölgesi <b>${n(lastBuyZoneRsi)}</b></span><span class="legend-sell">RSI 25 <b>25,00</b></span><span class="legend-adx">ADX <b>${n(latestIndicator?.adx)}</b></span>`;
+    if (indicatorLegend) indicatorLegend.innerHTML = `<span class="legend-sell">SON SAT SİNYALİ - ${n(lastSellSignal?.rsi)} - ${dateText(lastSellSignal?.signal_date)}</span><span class="legend-rsi">RSI ${n(latestIndicator?.rsi)}</span><span class="legend-buy">SON AL SİNYALİ - ${n(lastBuySignal?.rsi)} - ${dateText(lastBuySignal?.signal_date)}</span><span class="legend-adx">ADX ${n(latestIndicator?.adx)}</span>`;
     const indicatorLabels = [
       { text: '25,00', value: 25, color: COLORS.sell },
       { text: n(lastSellZoneRsi), value: lastSellZoneRsi, color: COLORS.sell },
@@ -375,10 +384,6 @@
     const range = $('#chartRange')?.value || '1Y';
     setRange(range);
 
-    const timeDescription = data.current_bar_provisional
-      ? `Güncel hafta geçici · tarih ${dateText(data.last_bar_date)} · fiyat verisi ${dateText(data.last_daily_bar_date)} · son tamamlanan hafta ${dateText(data.last_confirmed_bar_date)}`
-      : `Son tamamlanmış mum ${dateText(data.last_bar_date)}`;
-    $('#chartMeta').textContent = `${data.source || 'Kaynak bekleniyor'} · ${data.currency} · ${timeDescription} · ${n(bars.length)} ${data.timeframe === 'D' ? 'günlük' : 'haftalık'} mum · Kurallar ${p.custom ? 'varlığa özel' : 'genel'}: AL ${n(p.buy)} / SAT ${n(p.tp)} / RSI üst eşiği ${n(p.overbought)} · ${filterTR[p.filter] || 'filtre yok'}`;
     const latest = rows.at(-1), lastBar = bars.at(-1), previousBar = bars.at(-2);
     const instrumentNames = { AAPL: 'Apple Inc.', NVDA: 'NVIDIA Corporation', GLD: 'SPDR Gold Shares', BTC: 'Bitcoin', LLY: 'Eli Lilly and Company', TUPRS: 'Tüpraş', CPER: 'United States Copper Index Fund', THYAO: 'Türk Hava Yolları' };
     const instrumentName = $('#instrumentName');
@@ -390,7 +395,7 @@
     const instrumentChange = $('#instrumentChange');
     if (instrumentChange) {
       const change = previousBar && Number(previousBar.close) ? (Number(lastBar.close) / Number(previousBar.close) - 1) * 100 : null;
-      instrumentChange.textContent = change == null ? `${dateText(data.last_bar_date)} · kapanış` : `${change >= 0 ? '+' : ''}${pct(change)}% · ${dateText(data.last_bar_date)}${data.current_bar_provisional ? ' · geçici hafta' : ''}`;
+      instrumentChange.textContent = change == null ? `${dateText(data.last_bar_date)} · ${weekdayTR(data.last_bar_date)}` : `${change >= 0 ? '+' : ''}${pct(change)}% · ${dateText(data.last_bar_date)} · ${weekdayTR(data.last_bar_date)}${data.current_bar_provisional ? ' · geçici hafta' : ''}`;
       instrumentChange.className = change == null ? '' : change >= 0 ? 'positive' : 'negative';
     }
     const instrumentSub = $('#instrumentSub');
@@ -406,7 +411,7 @@
     $('#detailSignals').innerHTML = signals.length ? signals.map(signal => {
       const bar = bars.find(item => item.date === signal.chart_date);
       const buy = signal.event === 'buy_confirmed';
-      return `<div class="signal-item"><span class="signal-date">${dateText(signal.signal_date)}</span><div><b>${buy ? 'EKLE' : 'KÂR AL'} · ${data.symbol}</b><p>Kapanış ${n(signal.close_price ?? bar?.close)} ${data.currency} · Göreli güç (RSI) ${n(signal.rsi)} · Kullanılan ayar: ${p.ticker || data.symbol}</p></div><span class="signal-buy">${signal.timeframe === '1D' ? 'Günlük' : 'Haftalık'}</span></div>`;
+      return `<div class="signal-item"><span class="signal-date">${dateText(signal.signal_date)}</span><div class="signal-detail-copy"><b><img class="history-logo" src="/api/logos/${encodeURIComponent(data.symbol)}?market=${encodeURIComponent(data.market || '')}" alt="${data.symbol} logosu" data-logo-symbol="${data.symbol}" data-logo-market="${data.market || ''}" loading="lazy" decoding="async" onload="window.scheduleLogoRefresh(this)" onerror="window.fallbackLogo(this)">${buy ? 'EKLE' : 'KÂR AL'} · ${data.symbol}</b><p>Kapanış ${n(signal.close_price ?? bar?.close)} ${data.currency} · Göreli güç (RSI) ${n(signal.rsi)} · Kullanılan ayar: ${p.ticker || data.symbol}</p></div><span class="signal-buy">${signal.timeframe === '1D' ? 'Günlük' : 'Haftalık'}</span></div>`;
     }).join('') : '<div class="empty">Gösterilen dönemde ve tamamlanmış mumlarda EKLE veya KÂR AL işareti yok.</div>';
     chart.subscribeCrosshairMove(param => {
       const price = param.seriesData.get(main), r = param.seriesData.get(rsiLine), a = param.seriesData.get(adx);

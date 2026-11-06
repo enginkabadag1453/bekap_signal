@@ -13,23 +13,28 @@ import json
 import os
 import sqlite3
 import statistics
+import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo
 from urllib.request import Request as UrlRequest, urlopen
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 import bekap_indicators
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("BEKAP_DB_PATH", ROOT / "bekap.sqlite3"))
+LOGO_CACHE_DIR = ROOT / "cache" / "logos"
 VERSION = "0.2.0"
 WEEKLY_BRAKE_ENGINE_VERSION = "weekly-brake-v1"
+_INSTRUMENT_SEARCH_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_LOGO_CACHE_LOCK = threading.Lock()
+_LOGO_FETCH_PENDING: set[str] = set()
 app = FastAPI(title="BEKAP Esinli Sepet Sinyal Sistemi", version=VERSION)
 app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
 
@@ -584,8 +589,19 @@ def overview() -> dict[str, Any]:
         assets = [dict(r) for r in con.execute("""SELECT a.*,m.provider,m.provider_symbol,m.status data_status,
             m.last_checked,m.last_bar_date,m.last_error,
             (SELECT b.close FROM bars b WHERE b.asset_id=a.id AND b.timeframe='1D' ORDER BY b.date DESC LIMIT 1) last_close,
+            (SELECT b.close FROM bars b WHERE b.asset_id=a.id AND b.timeframe='1D' ORDER BY b.date DESC LIMIT 1 OFFSET 1) previous_close,
             (SELECT b.date FROM bars b WHERE b.asset_id=a.id AND b.timeframe='1D' ORDER BY b.date DESC LIMIT 1) price_date
             FROM assets a LEFT JOIN market_data_state m ON m.asset_id=a.id ORDER BY a.symbol""")]
+        for asset in assets:
+            previous = asset.get("previous_close")
+            latest = asset.get("last_close")
+            asset["day_change_pct"] = ((float(latest) / float(previous) - 1) * 100
+                                       if latest is not None and previous not in (None, 0) else None)
+            latest_signal = con.execute("""SELECT event,signal_date FROM signals
+                WHERE asset_id=? AND is_current=1 AND strategy_version LIKE ?
+                ORDER BY signal_date DESC,id DESC LIMIT 1""",
+                (asset["id"], f"{WEEKLY_BRAKE_ENGINE_VERSION}:%")).fetchone()
+            asset["last_signal"] = dict(latest_signal) if latest_signal else None
         recent = [dict(r) for r in con.execute("""SELECT s.*,a.symbol,a.role,a.currency FROM signals s
           JOIN assets a ON a.id=s.asset_id WHERE s.is_current=1 AND s.strategy_version LIKE ?
           ORDER BY s.signal_date DESC,s.id DESC LIMIT 30""", (f"{WEEKLY_BRAKE_ENGINE_VERSION}:%",))]
@@ -596,6 +612,114 @@ def overview() -> dict[str, Any]:
             "strategy_version": strategy_version, "data_status": "uploaded" if bars else "missing",
             "provider_configured": True, "provider_name": "Yahoo Finance daily chart feed",
             "forward_cutoff": "2027-01-02", "as_of": now()}
+
+
+def search_yahoo_instruments(query: str) -> list[dict[str, Any]]:
+    """Search Yahoo Finance for stocks and ETFs; results are cached briefly by the API route."""
+    query = query.strip()
+    if not query:
+        return []
+    params = urlencode({"q": query, "quotesCount": 12, "newsCount": 0, "enableFuzzyQuery": "true"})
+    request = UrlRequest(
+        f"https://query1.finance.yahoo.com/v1/finance/search?{params}",
+        headers={"User-Agent": "Mozilla/5.0 (compatible; BEKAP-Sepet/1.0)"},
+    )
+    with urlopen(request, timeout=5) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    results = []
+    for quote_item in payload.get("quotes", []):
+        kind = str(quote_item.get("quoteType") or "").upper()
+        symbol = str(quote_item.get("symbol") or "").strip().upper()
+        if kind not in {"EQUITY", "ETF"} or not symbol:
+            continue
+        exchange = str(quote_item.get("exchDisp") or quote_item.get("exchange") or "")
+        exchange_upper = exchange.upper()
+        currency = ("TRY" if any(token in exchange_upper for token in ("BIST", "ISTANBUL", "TURKEY")) else
+                    "USD" if any(token in exchange_upper for token in ("NASDAQ", "NYSE", "AMEX", "NMS", "NGM", "NCM", "PCX")) else None)
+        results.append({"symbol": symbol, "name": quote_item.get("longname") or quote_item.get("shortname") or symbol,
+                        "market": exchange, "currency": currency, "kind": "ETF" if kind == "ETF" else "Hisse"})
+    return results
+
+
+@app.get("/api/instruments/search")
+def instrument_search(q: str = "") -> dict[str, Any]:
+    query = q.strip()[:64]
+    if len(query) < 1:
+        return {"results": []}
+    key = query.casefold()
+    cached = _INSTRUMENT_SEARCH_CACHE.get(key)
+    if cached and cached[0] > time.monotonic():
+        return {"results": cached[1]}
+    try:
+        results = search_yahoo_instruments(query)
+    except Exception as error:
+        raise HTTPException(502, "Hisse ve ETF eşleşmeleri şu anda alınamadı.") from error
+    _INSTRUMENT_SEARCH_CACHE[key] = (time.monotonic() + 300, results)
+    return {"results": results}
+
+
+def logo_response_fallback(symbol: str) -> Response:
+    initials = "".join(part[0] for part in symbol.replace(".", " ").replace("-", " ").split()[:2]) or symbol[:2]
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+           f'<rect width="100" height="100" rx="22" fill="#172b40"/>'
+           f'<text x="50" y="60" text-anchor="middle" font-family="Arial,sans-serif" '
+           f'font-size="34" font-weight="700" fill="#9bd1ff">{initials}</text></svg>')
+    return Response(svg, media_type="image/svg+xml", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/logos/{symbol}")
+def instrument_logo(symbol: str, background_tasks: BackgroundTasks, market: str = "") -> Response:
+    """Serve cached PNGs immediately and download missing logos after the response."""
+    symbol = symbol.strip().upper()
+    if not symbol or len(symbol) > 32 or any(char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.^_-" for char in symbol):
+        raise HTTPException(400, "Geçersiz sembol.")
+    safe_key = symbol.replace("/", "_")
+    LOGO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cached_path = LOGO_CACHE_DIR / f"{safe_key}.png"
+    miss_path = LOGO_CACHE_DIR / f"{safe_key}.missing"
+    with _LOGO_CACHE_LOCK:
+        if cached_path.is_file():
+            return FileResponse(cached_path, media_type="image/png", headers={"Cache-Control": "public, max-age=2592000"})
+        if miss_path.exists() and time.time() - miss_path.stat().st_mtime < 86400:
+            return logo_response_fallback(symbol)
+        if symbol not in _LOGO_FETCH_PENDING:
+            _LOGO_FETCH_PENDING.add(symbol)
+            background_tasks.add_task(fetch_and_cache_logo, symbol, market)
+    return logo_response_fallback(symbol)
+
+
+def fetch_and_cache_logo(symbol: str, market: str) -> None:
+    """Fetch a missing logo once into the local, persistent logo library."""
+    safe_key = symbol.replace("/", "_")
+    cached_path = LOGO_CACHE_DIR / f"{safe_key}.png"
+    miss_path = LOGO_CACHE_DIR / f"{safe_key}.missing"
+    with _LOGO_CACHE_LOCK:
+        if cached_path.is_file() or (miss_path.exists() and time.time() - miss_path.stat().st_mtime < 86400):
+            _LOGO_FETCH_PENDING.discard(symbol)
+            return
+    try:
+        with db() as con:
+            asset = con.execute("SELECT market FROM assets WHERE symbol=? LIMIT 1", (symbol,)).fetchone()
+        resolved_market = market or (asset["market"] if asset else "")
+        logo_symbol = yahoo_ticker(symbol, resolved_market)
+        url = f"https://assets.parqet.com/logos/symbol/{quote(logo_symbol, safe='.^_-')}?format=png"
+        request = UrlRequest(url, headers={"User-Agent": "Mozilla/5.0 (compatible; BEKAP-Sepet/1.0)"})
+        with urlopen(request, timeout=2.5) as response:
+            content = response.read(2_000_001)
+            if (response.headers.get_content_type() != "image/png" or not content.startswith(b"\x89PNG\r\n\x1a\n")
+                    or len(content) > 2_000_000):
+                raise ValueError("Logo yanıtı geçerli PNG değil.")
+        LOGO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        temp_path = cached_path.with_suffix(".tmp")
+        temp_path.write_bytes(content)
+        temp_path.replace(cached_path)
+        miss_path.unlink(missing_ok=True)
+    except Exception:
+        LOGO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        miss_path.touch()
+    finally:
+        with _LOGO_CACHE_LOCK:
+            _LOGO_FETCH_PENDING.discard(symbol)
 
 
 @app.post("/api/data/refresh")

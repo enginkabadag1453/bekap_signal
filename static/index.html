@@ -7,31 +7,38 @@
   <link rel="stylesheet" href="/static/style.css?v=2">
   <link rel="stylesheet" href="/static/signals.css?v=4">
   <link rel="stylesheet" href="/static/typography.css?v=1">
+  <link rel="stylesheet" href="/static/product.css?v=1">
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="#top" aria-label="BEKAP ana sayfa"><span class="brand-mark">B</span><span><b>BEKAP</b><small>SİNYAL ARAŞTIRMA</small></span></a>
-    <nav class="topnav" aria-label="Ana gezinme"><a href="#top">Genel bakış</a><a href="#basket">Sepet</a><a class="active" href="#workspace">Grafik</a><a href="#signal-panel">Sinyaller</a></nav>
+    <a class="brand" href="#overview" aria-label="BEKAP ana sayfa"><span class="brand-mark">B</span><span><b>BEKAP</b><small>SİNYAL ARAŞTIRMA</small></span></a>
     <div class="topright"><span class="live"><i></i> KİŞİSEL ÇALIŞMA ALANI</span><span class="market-date">GÜNLÜK KAPANIŞ <b id="clock"></b></span><button class="refresh-top" id="refreshData" type="button">⟳ <span>Veriyi güncelle</span></button><button id="themeToggle" class="theme-toggle" type="button" aria-label="Temayı değiştir"><span id="themeIcon">☀</span><span id="themeLabel">Açık tema</span></button></div>
   </header>
   <div class="app-shell" id="top">
-    <aside class="asset-rail" aria-label="Sepet varlıkları">
-      <div class="rail-head"><div><p class="eyebrow">İZLEME LİSTESİ</p><h1>Varlıklar</h1></div><span class="asset-count" id="assetCount">0</span></div>
-      <label class="asset-search"><span>⌕</span><input id="assetSearch" type="search" placeholder="Sembol ara" aria-label="Sepette sembol ara"></label>
-      <button class="primary add-asset" id="addOpen" type="button"><span>＋</span> Varlık ekle</button>
-      <div class="asset-picker" id="assetPicker"><div class="rail-empty">Sepet hazırlanıyor…</div></div>
-      <div class="rail-bottom"><div class="data-health"><span class="health-dot"></span><b id="dataState">Veri durumu yükleniyor</b><small id="dataInfo">Fiyat verisi eşitleniyor.</small><div class="progress"><i id="progress"></i></div></div><a href="#settings">Strateji laboratuvarı <span>↗</span></a><small class="strategy-version">Sürüm <b id="version">0,1,0</b></small></div>
+    <aside class="app-sidebar" aria-label="Çalışma alanı menüsü">
+      <p class="eyebrow sidebar-label">ÇALIŞMA ALANI</p>
+      <nav class="side-menu" aria-label="Ana bölümler">
+        <a class="side-link active" href="#overview" data-view="overview"><span class="side-icon">◫</span><span>Genel Bakış</span></a>
+        <a class="side-link" href="#basket" data-view="basket"><span class="side-icon">▦</span><span>Sepet</span></a>
+        <a class="side-link" href="#watchlist" data-view="watchlist"><span class="side-icon">☆</span><span>İzleme Listesi</span><b id="assetCount">0</b></a>
+      </nav>
+      <div class="sidebar-status"><div class="data-health"><span class="health-dot"></span><b id="dataState">Veri durumu yükleniyor</b><small id="dataInfo">Fiyat verisi eşitleniyor.</small><div class="progress"><i id="progress"></i></div></div><a href="#settings" class="strategy-link" data-view="overview">Strateji laboratuvarı <span>↗</span></a><small class="strategy-version">Sürüm <b id="version">0,1,0</b></small></div>
     </aside>
 
     <main class="work-area">
+      <section class="page-view" id="overviewView" data-view-page="overview">
       <section class="workspace" id="workspace">
         <div class="chart-column">
           <div class="instrument-head">
-            <div><p class="eyebrow">GRAFİK ARAŞTIRMA MASASI <span class="sep">/</span> <span id="instrumentMarket">SEPET</span></p><h2 id="instrumentName">Bir varlık seç</h2><p class="instrument-sub" id="instrumentSub">Sembol, piyasa ve strateji özeti burada görünür.</p></div>
+            <div class="instrument-identity"><img class="instrument-logo" id="instrumentLogo" alt="" hidden><div><p class="eyebrow">GRAFİK ARAŞTIRMA MASASI <span class="sep">/</span> <span id="instrumentMarket">SEPET</span></p><h2 id="instrumentName">Bir varlık seç</h2><p class="instrument-sub" id="instrumentSub">Sembol, piyasa ve strateji özeti burada görünür.</p></div></div>
             <div class="quote"><b id="instrumentPrice">—</b><span id="instrumentChange">Günlük kapanış</span></div>
           </div>
           <div class="chart-toolbar" aria-label="Grafik ayarları">
-            <select id="chartAsset" aria-label="Grafikte gösterilecek varlık"><option value="">Varlık seçin</option></select>
+            <div class="instrument-search">
+              <label class="instrument-search-field"><span>⌕</span><input id="assetSearch" type="search" placeholder="HİSSE / ETF GİRİNİZ" aria-label="Hisse veya ETF ara" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="assetSearchResults" aria-expanded="false"></label>
+              <div id="assetSearchResults" class="instrument-search-results" role="listbox" hidden></div>
+            </div>
+            <select id="chartAsset" aria-label="Grafikte gösterilecek varlık" hidden><option value="">Varlık seçin</option></select>
             <select id="chartInterval" aria-label="Zaman aralığı"><option value="D">Günlük</option><option value="W">Haftalık</option></select>
             <select id="chartStyle" aria-label="Grafik türü"><option value="candle" selected>Mum</option><option value="line">Çizgi</option></select>
             <select id="chartRange" aria-label="Grafik geçmiş aralığı"><option value="5Y">5 yıl</option><option value="1Y" selected>1 yıl</option><option value="6M">6 ay</option><option value="3M">3 ay</option><option value="1M">1 ay</option></select>
@@ -40,7 +47,6 @@
             <label class="toolbar-toggle"><input id="chartLevels" type="checkbox" checked><span>Yatay çizgiler</span></label>
             <label class="toolbar-toggle"><input id="chartSignals" type="checkbox" checked><span>AL-SAT kutucukları</span></label>
           </div>
-          <div id="chartMeta" class="chart-meta">Fiyat ve gösterge verisi hazırlanıyor…</div>
           <div id="indicatorLegend" class="indicator-legend" aria-live="polite"></div>
           <div id="chart" class="chartbox"><div class="chartplaceholder">Sepetten varlık seçerek grafiği aç.</div></div>
           <div id="chartLegend" class="chart-legend">Mum üzerine gelerek kapanış, RSI ve ADX değerlerini incele.</div>
@@ -57,11 +63,6 @@
         </aside>
       </section>
 
-      <section class="basket-section" id="basket">
-        <div class="section-title"><div><p class="eyebrow">SEPET GÖRÜNÜMÜ</p><h2>Varlıklar ve fiyatlar</h2></div><button class="text-button" type="button" id="basketAdd">＋ Varlık ekle</button></div>
-        <div class="tablewrap"><table><thead><tr><th>Varlık</th><th>Piyasa</th><th>Rol</th><th>Hedef / üst ağırlık</th><th>Para birimi</th><th>Son kapanış</th><th>Son veri</th><th></th></tr></thead><tbody id="assets"><tr><td colspan="8" class="empty">Sepet henüz tanımlanmadı.</td></tr></tbody></table></div>
-      </section>
-
       <details class="tools-section" id="settings"><summary><span><small>AYARLAR VE VERİ</small><b>Strateji, test sermayesi ve veri yönetimi</b></span><span class="expand">＋</span></summary>
         <div class="tools-grid">
           <section class="tool-card strategy"><div class="section-title"><div><p class="eyebrow">SÜRÜMLENMİŞ KURALLAR</p><h2>Strateji sözleşmesi</h2></div><span class="pill">BEKAP uyarlaması</span></div><div class="rule-grid"><div><small>Gösterge</small><b>BEKAPRSI · RSI(14)</b></div><div><small>Alım teyidi</small><b>Varlık eşiği + RSI dönüşü</b></div><div><small>Haftalık düşüş kuralı</small><b>Son KÂR AL fiyatından −21,00%</b></div><div><small>Günlük moda dönüş</small><b>Günlük KÂR AL teyidinde</b></div><div><small>Ömürlük varlık</small><b>Kârın bir bölümü satılır</b></div><div><small>Trend / dönemsel</small><b>Tam çıkış</b></div></div><div class="callout">Kademe, satış payı, kâr maliyeti ve pozisyon sınırları varlığa özel sözleşmede belirlenir.</div></section>
@@ -72,9 +73,32 @@
         </div>
       </details>
       <footer>BEKAP kurallarından uyarlama · Kişisel araştırma aracı · Emir göndermez · Veriler sağlayıcı gecikmesine tabi olabilir</footer>
+      </section>
+
+      <section class="page-view basket-section" id="basket" data-view-page="basket" hidden>
+        <div class="section-title"><div><p class="eyebrow">PORTFÖY TAKİBİ</p><h2>Sepet varlıkları</h2><p class="section-subtitle">Fiyat, günlük hareket, ağırlık hedefleri ve son teyitli sinyal</p></div><button class="primary" type="button" id="basketAdd">＋ Varlık ekle</button></div>
+        <div class="table-tools"><label class="table-search"><span>⌕</span><input id="basketSearch" type="search" placeholder="Sepette ara" aria-label="Sepette ara"></label><span id="basketResultCount" class="table-result-count">0 varlık</span></div>
+        <div class="tablewrap"><table class="basket-table"><thead><tr>
+          <th><button class="sort-button" data-sort="symbol">Varlık <span>↕</span></button></th>
+          <th><button class="sort-button" data-sort="market">Piyasa <span>↕</span></button></th>
+          <th><button class="sort-button" data-sort="role">Rol <span>↕</span></button></th>
+          <th><button class="sort-button" data-sort="last_close">Son fiyat <span>↕</span></button></th>
+          <th><button class="sort-button" data-sort="day_change_pct">Günlük değişim <span>↕</span></button></th>
+          <th><button class="sort-button" data-sort="target_weight">Hedef / üst ağırlık <span>↕</span></button></th>
+          <th><button class="sort-button" data-sort="last_signal">Son sinyal <span>↕</span></button></th>
+          <th><button class="sort-button" data-sort="signal_date">Sinyal tarihi <span>↕</span></button></th>
+          <th><button class="sort-button" data-sort="price_date">Veri tarihi <span>↕</span></button></th>
+          <th></th>
+        </tr></thead><tbody id="assets"><tr><td colspan="10" class="empty">Sepet hazırlanıyor…</td></tr></tbody></table></div>
+      </section>
+
+      <section class="page-view watchlist-view" id="watchlist" data-view-page="watchlist" hidden>
+        <div class="section-title"><div><p class="eyebrow">İZLEME LİSTESİ</p><h2>Takip edilen hisseler ve ETF’ler</h2><p class="section-subtitle">Varlık seçerek grafiğine ve sinyallerine geç.</p></div><button class="primary" type="button" id="addOpen">＋ Varlık ekle</button></div>
+        <div id="assetPicker" class="watchlist-grid"><div class="rail-empty">İzleme listesi hazırlanıyor…</div></div>
+      </section>
     </main>
   </div>
 
   <dialog id="assetDialog"><form id="assetForm"><div class="dialoghead"><div><p class="eyebrow">SEPET SÖZLEŞMESİ</p><h2>Varlık ekle</h2></div><button type="button" class="x" id="closeDialog" aria-label="Kapat">×</button></div><div class="formgrid"><label>Sembol<input name="symbol" placeholder="örn. AAPL" required maxlength="32"></label><label>Piyasa<input name="market" placeholder="NASDAQ / BIST / KRİPTO" required></label><label>Portföy rolü<select name="role"><option value="lifetime">Ömürlük · kısmi kâr satışı</option><option value="trend">Trend · tam çıkış</option><option value="periodic">Dönemsel · tam çıkış</option></select></label><label>Para birimi<input name="currency" value="USD" required maxlength="8"></label><label>Hedef ağırlık (%)<input name="target_weight" type="text" inputmode="decimal" value="0,00"></label><label>Üst ağırlık (%)<input name="max_weight" type="text" inputmode="decimal" value="0,00"></label><label class="wide">Grafik sağlayıcı sembolü<input name="tv_symbol" placeholder="NASDAQ:AAPL"></label><label>RSI dönemi<input name="rsi_period" type="text" inputmode="decimal" value="14,00"></label><label>Alım bölgesi üst sınırı<input name="buy_zone_max" type="text" inputmode="decimal" value="35,00"></label><label class="wide">Haftalık moda geçiş düşüşü (%)<input name="weekly_brake_drawdown_pct" type="text" inputmode="decimal" value="21,00"></label></div><p class="muted">Varlık ve strateji parametreleri kaydedilir. Otomatik emir veya yeniden dengeleme yapılmaz.</p><div class="dialogactions"><button type="button" class="secondary" id="cancelDialog">Vazgeç</button><button class="primary">Sepete ekle</button></div></form></dialog>
-  <script src="/static/vendor/lightweight-charts.js"></script><script src="/static/chart.js?v=3"></script><script src="/static/app.js?v=5"></script>
+  <script src="/static/vendor/lightweight-charts.js"></script><script src="/static/chart.js?v=6"></script><script src="/static/app.js?v=8"></script>
 </body></html>

@@ -1,32 +1,10 @@
 const $ = s => document.querySelector(s);
 const roleTR = { lifetime: 'Ömürlük', trend: 'Trend', periodic: 'Dönemsel' };
 let signalTableRows = [];
-
-function applyAssetSearch() {
-  const input = $('#assetSearch');
-  const picker = $('#assetPicker');
-  if (!input || !picker) return;
-  const query = input.value.trim().toLocaleLowerCase('tr-TR');
-  const cards = [...picker.querySelectorAll('.asset-card')];
-  let matches = 0;
-  cards.forEach(card => {
-    const match = card.querySelector('.asset-symbol').textContent.toLocaleLowerCase('tr-TR').includes(query);
-    card.hidden = !match;
-    if (match) matches += 1;
-  });
-  let empty = picker.querySelector('#assetSearchEmpty');
-  if (query && matches === 0) {
-    if (!empty) {
-      empty = document.createElement('div');
-      empty.id = 'assetSearchEmpty';
-      empty.className = 'rail-empty';
-      picker.append(empty);
-    }
-    empty.textContent = `“${input.value.trim()}” için eşleşen varlık yok.`;
-  } else {
-    empty?.remove();
-  }
-}
+let portfolioAssets = [];
+let basketSort = { key: 'symbol', direction: 1 };
+let searchTimer = null;
+let searchRequestId = 0;
 
 async function api(url, opts = {}) {
   const response = await fetch(url, opts);
@@ -65,6 +43,156 @@ const eventTR = value => ({ buy_confirmed: 'ALIM teyidi', take_profit_confirmed:
 const reasonTR = value => String(value || '—').replace('BEKAPRSI AUTO EKLE:', 'BEKAPRSI alım teyidi:').replace('BEKAPRSI AUTO KAR AL:', 'BEKAPRSI kâr-al teyidi:').replace('RSI(14)', 'göreli güç endeksi (RSI)').replace(/(?<![\w.])([+-]?\d+(?:\.\d+)?)(?![\w.])/g, token => numberTR(Number(token)));
 const timeframeTR = value => value === '1D' || value === 'D' ? 'Günlük' : value === '1W' || value === 'W' ? 'Haftalık' : value;
 const signalActionTR = value => value === 'buy_confirmed' ? 'AL' : ['take_profit_confirmed', 'full_exit'].includes(value) ? 'SAT' : null;
+const logoURL = (asset, retry = false) => `/api/logos/${encodeURIComponent(asset.symbol)}?market=${encodeURIComponent(asset.market || '')}${retry ? '&retry=1' : ''}`;
+const signalTR = value => value === 'buy_confirmed' ? 'AL' : ['take_profit_confirmed', 'full_exit'].includes(value) ? 'SAT' : '—';
+const imageHTML = (asset, css = 'asset-logo') => `<img class="${css}" src="${logoURL(asset)}" alt="${esc(asset.symbol)} logosu" data-logo-symbol="${esc(asset.symbol)}" data-logo-market="${esc(asset.market || '')}" loading="lazy" decoding="async" onload="window.scheduleLogoRefresh(this)" onerror="window.fallbackLogo(this)">`;
+window.fallbackLogo = image => {
+  const symbol = image.dataset.logoSymbol || image.getAttribute('alt').replace(/ logosu$/, '');
+  const initials = symbol.replace(/[.\-]/g, ' ').split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('') || symbol.slice(0, 2);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#172b40"/><text x="50" y="60" text-anchor="middle" font-family="Arial,sans-serif" font-size="34" font-weight="700" fill="#9bd1ff">${esc(initials)}</text></svg>`;
+  image.src = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+};
+window.scheduleLogoRefresh = image => {
+  if (image.dataset.logoRetry) return;
+  image.dataset.logoRetry = 'pending';
+  setTimeout(() => {
+    if (!image.isConnected) return;
+    image.dataset.logoRetry = 'done';
+    const symbol = image.dataset.logoSymbol || image.getAttribute('alt').replace(/ logosu$/, '');
+    const market = image.dataset.logoMarket || new URL(image.src).searchParams.get('market') || '';
+    image.src = `/api/logos/${encodeURIComponent(symbol)}?market=${encodeURIComponent(market)}&retry=1`;
+  }, 3200);
+};
+
+function setView(view, updateHash = true) {
+  const known = ['overview', 'basket', 'watchlist'].includes(view) ? view : 'overview';
+  document.querySelectorAll('[data-view-page]').forEach(page => { page.hidden = page.dataset.viewPage !== known; });
+  document.querySelectorAll('.side-link').forEach(link => {
+    const active = link.dataset.view === known;
+    link.classList.toggle('active', active);
+    if (active) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
+  });
+  if (updateHash && location.hash !== `#${known}`) history.replaceState(null, '', `#${known}`);
+}
+
+function renderWatchlist(assets) {
+  const host = $('#assetPicker');
+  host.innerHTML = assets.length ? assets.map(asset => `<button type="button" class="watchlist-card${String(asset.id) === $('#chartAsset').value ? ' selected' : ''}" data-asset-id="${asset.id}">
+    ${imageHTML(asset)}<span class="watchlist-symbol">${esc(asset.symbol)}</span><span class="watchlist-price">${asset.last_close == null ? '—' : `${numberTR(asset.last_close)} ${esc(asset.currency)}`}</span>
+    <span class="watchlist-detail">${esc(asset.market)} · ${roleTR[asset.role] || esc(asset.role)}</span><span class="watchlist-date">${asset.price_date ? dateTR(asset.price_date) : asset.data_status === 'error' ? 'Veri sorunu' : 'Veri bekleniyor'}</span>
+  </button>`).join('') : '<div class="rail-empty">İzleme listeniz boş. İlk hisse veya ETF’nizi ekleyin.</div>';
+  host.querySelectorAll('[data-asset-id]').forEach(button => button.addEventListener('click', () => window.openAssetChart(Number(button.dataset.assetId))));
+}
+
+function renderBasket(assets) {
+  const query = ($('#basketSearch')?.value || '').trim().toLocaleLowerCase('tr-TR');
+  const visible = assets.filter(asset => `${asset.symbol} ${asset.market}`.toLocaleLowerCase('tr-TR').includes(query));
+  const { key, direction } = basketSort;
+  visible.sort((a, b) => {
+    let av = key === 'last_signal' ? signalTR(a.last_signal?.event) : key === 'signal_date' ? a.last_signal?.signal_date : a[key];
+    let bv = key === 'last_signal' ? signalTR(b.last_signal?.event) : key === 'signal_date' ? b.last_signal?.signal_date : b[key];
+    if (key === 'target_weight') { av = Number(a.target_weight); bv = Number(b.target_weight); }
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' || typeof bv === 'number') return (Number(av) - Number(bv)) * direction;
+    return String(av).localeCompare(String(bv), 'tr', { numeric: true }) * direction;
+  });
+  $('#basketResultCount').textContent = `${numberTR(visible.length)} varlık`;
+  $('#assets').innerHTML = visible.length ? visible.map(asset => {
+    const signal = asset.last_signal;
+    const change = asset.day_change_pct;
+    const date = signal?.signal_date ? dateTR(signal.signal_date) : '—';
+    const priceDate = asset.price_date || asset.last_bar_date;
+    const price = asset.last_close == null ? '—' : `${numberTR(asset.last_close)} ${esc(asset.currency)}`;
+    const actionClass = signalTR(signal?.event) === 'AL' ? 'buy' : signalTR(signal?.event) === 'SAT' ? 'sell' : '';
+    return `<tr data-row-asset="${asset.id}">
+      <td><button class="table-asset" data-chart-id="${asset.id}">${imageHTML(asset, 'table-logo')}<span><b>${esc(asset.symbol)}</b><small>${esc(asset.currency)}</small></span></button></td>
+      <td>${esc(asset.market)}</td><td><span class="role-tag">${roleTR[asset.role] || esc(asset.role)}</span></td>
+      <td class="table-price">${price}</td>
+      <td class="table-change ${change == null ? '' : change >= 0 ? 'positive' : 'negative'}">${change == null ? '—' : `${change >= 0 ? '+' : ''}${numberTR(change)}%`}</td>
+      <td>${numberTR(asset.target_weight * 100)}% <span class="weight-divider">/</span> ${numberTR(asset.max_weight * 100)}%</td>
+      <td>${signal ? `<span class="table-signal ${actionClass}">${signalTR(signal.event)}</span>` : '—'}</td>
+      <td class="table-date">${date}</td><td class="table-date">${priceDate ? dateTR(priceDate) : asset.data_status === 'error' ? esc(dataErrorTR(asset.last_error)) : 'Bekleniyor'}</td>
+      <td class="row-actions"><button class="secondary" data-chart-id="${asset.id}">Grafik</button><button class="secondary" data-remove-id="${asset.id}">Sil</button></td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="10" class="empty">${assets.length ? 'Arama ölçütüyle eşleşen varlık bulunamadı.' : 'Sepetiniz henüz tanımlı değil.'}</td></tr>`;
+  $('#assets').querySelectorAll('[data-chart-id]').forEach(button => button.addEventListener('click', () => window.openAssetChart(Number(button.dataset.chartId))));
+  $('#assets').querySelectorAll('[data-remove-id]').forEach(button => button.addEventListener('click', () => window.removeAsset(Number(button.dataset.removeId))));
+  document.querySelectorAll('.sort-button').forEach(button => {
+    const active = button.dataset.sort === key;
+    button.classList.toggle('sorted', active);
+    button.querySelector('span').textContent = active ? (direction === 1 ? '↑' : '↓') : '↕';
+  });
+}
+
+function closeInstrumentSearch() {
+  const results = $('#assetSearchResults');
+  results.hidden = true;
+  $('#assetSearch').setAttribute('aria-expanded', 'false');
+}
+
+function selectTrackedInstrument(asset) {
+  $('#chartAsset').value = String(asset.id);
+  $('#assetSearch').value = asset.symbol;
+  closeInstrumentSearch();
+  setView('overview');
+  load();
+}
+
+function prepareNewInstrument(result) {
+  const form = $('#assetForm');
+  form.elements.symbol.value = result.symbol;
+  form.elements.market.value = result.market || '';
+  form.elements.currency.value = result.currency || '';
+  form.elements.tv_symbol.value = result.symbol;
+  closeInstrumentSearch();
+  $('#assetDialog').showModal();
+}
+
+function displayInstrumentMatches(query, remote = []) {
+  const host = $('#assetSearchResults');
+  const local = portfolioAssets.filter(asset => `${asset.symbol} ${asset.market}`
+    .toLocaleLowerCase('tr-TR').includes(query.toLocaleLowerCase('tr-TR')));
+  const trackedSymbols = new Set(local.map(asset => asset.symbol.toLocaleUpperCase('tr-TR')));
+  const external = remote.filter(result => !trackedSymbols.has(result.symbol.toLocaleUpperCase('tr-TR')));
+  const trackedMarkup = local.map(asset => `<button type="button" class="instrument-result" role="option" data-tracked-id="${asset.id}">
+    ${imageHTML(asset, 'result-logo')}<span class="instrument-result-copy"><b>${esc(asset.symbol)}</b><small>${esc(asset.market)} · ${roleTR[asset.role] || esc(asset.role)}</small></span><span class="result-kind">İZLEMEDE</span>
+  </button>`).join('');
+  const externalMarkup = external.slice(0, 8).map((result, index) => `<button type="button" class="instrument-result" role="option" data-remote-index="${index}">
+    ${imageHTML({ symbol: result.symbol, market: result.market }, 'result-logo')}<span class="instrument-result-copy"><b>${esc(result.symbol)}</b><small>${esc(result.name)} · ${esc(result.market || 'Piyasa bilgisi yok')}</small></span><span class="result-kind">${esc(result.kind)}</span>
+  </button>`).join('');
+  host.innerHTML = trackedMarkup + externalMarkup || '<div class="instrument-result-empty">Eşleşme bulunamadı. Hisse veya ETF kodunu kontrol edin.</div>';
+  host.hidden = false;
+  $('#assetSearch').setAttribute('aria-expanded', 'true');
+  host.querySelectorAll('[data-tracked-id]').forEach(button => button.addEventListener('click', () => {
+    const asset = portfolioAssets.find(item => String(item.id) === button.dataset.trackedId);
+    if (asset) selectTrackedInstrument(asset);
+  }));
+  host.querySelectorAll('[data-remote-index]').forEach(button => button.addEventListener('click', () => {
+    const result = external[Number(button.dataset.remoteIndex)];
+    if (result) prepareNewInstrument(result);
+  }));
+}
+
+async function searchInstruments(query) {
+  const requestId = ++searchRequestId;
+  const localMatches = portfolioAssets.some(asset => `${asset.symbol} ${asset.market}`
+    .toLocaleLowerCase('tr-TR').includes(query.toLocaleLowerCase('tr-TR')));
+  if (!query) { closeInstrumentSearch(); return; }
+  const host = $('#assetSearchResults');
+  host.innerHTML = '<div class="instrument-result-empty">Hisse ve ETF eşleşmeleri aranıyor…</div>';
+  host.hidden = false;
+  $('#assetSearch').setAttribute('aria-expanded', 'true');
+  try {
+    const response = await api(`/api/instruments/search?q=${encodeURIComponent(query)}`);
+    if (requestId !== searchRequestId || $('#assetSearch').value.trim() !== query) return;
+    displayInstrumentMatches(query, response.results || []);
+  } catch (error) {
+    if (requestId !== searchRequestId) return;
+    displayInstrumentMatches(query, []);
+    if (!localMatches) host.insertAdjacentHTML('beforeend', '<div class="instrument-search-note">Piyasa araması şu anda kullanılamıyor.</div>');
+  }
+}
 const dataErrorTR = value => ({
   "TWELVE_DATA_API_KEY tanımlı değil": 'Fiyat sağlayıcısına şu anda erişilemiyor.',
   'Henüz tamamlanmış günlük bar gelmedi': 'Tamamlanmış günlük kapanış henüz yayımlanmadı.',
@@ -87,6 +215,7 @@ const telegramTR = raw => String(raw).split('\n').map((line, index) => {
 async function load() {
   try {
     const d = await api('/api/overview');
+    portfolioAssets = d.assets;
     $('#assetCount').textContent = numberTR(d.assets.length);
     const signalLists = await Promise.all(d.assets.map(a => api(`/api/assets/${a.id}/signals`).catch(() => [])));
     signalTableRows = d.assets.flatMap((asset, index) => signalLists[index]
@@ -110,29 +239,24 @@ async function load() {
     const selected = d.assets.some(a => String(a.id) === previousAsset) ? previousAsset : String(d.assets[0]?.id || '');
     $('#chartAsset').value = selected;
     if (!$('#uploadAsset').value) $('#uploadAsset').value = selected;
-    $('#assetPicker').innerHTML = d.assets.length ? d.assets.map(a => `<button type="button" class="asset-card${String(a.id) === selected ? ' selected' : ''}" data-asset-id="${a.id}" aria-pressed="${String(a.id) === selected}">
-      <span class="asset-symbol">${esc(a.symbol)}</span><span class="asset-price">${a.last_close == null ? '—' : `${numberTR(a.last_close)} ${esc(a.currency)}`}</span>
-      <span class="asset-role">${roleTR[a.role] || esc(a.role)}</span><span class="asset-status">${a.data_status === 'ok' ? dateTR(a.price_date || a.last_bar_date) : a.data_status === 'error' ? 'Veri sorunu' : 'Veri bekleniyor'}</span>
-    </button>`).join('') : '<div class="rail-empty">Sepetin boş. İlk varlığını ekleyerek başla.</div>';
-    $('#assetPicker').querySelectorAll('[data-asset-id]').forEach(button => button.addEventListener('click', () => {
-      $('#chartAsset').value = button.dataset.assetId;
-      $('#assetPicker').querySelectorAll('.asset-card').forEach(card => { const active = card === button; card.classList.toggle('selected', active); card.setAttribute('aria-pressed', String(active)); });
-      load();
-    }));
-    applyAssetSearch();
-    const rows = d.assets.map(a => `<tr>
-      <td class="symbol">${esc(a.symbol)}</td><td>${esc(a.market)}</td>
-      <td><span class="role-tag">${roleTR[a.role]}</span></td>
-      <td>${numberTR(a.target_weight * 100)}% / ${numberTR(a.max_weight * 100)}%</td>
-      <td>${esc(a.currency)}</td>
-      <td>${a.last_close == null ? '—' : `${numberTR(a.last_close)} ${esc(a.currency)}`}</td>
-      <td>${a.data_status === 'ok' ? dateTR(a.price_date || a.last_bar_date) : a.data_status === 'error' ? esc(dataErrorTR(a.last_error)) : 'İlk veri eşitlemesi bekleniyor'}</td>
-      <td class="row-actions"><button class="secondary" onclick="openAssetChart(${a.id})">Grafik</button><button class="secondary" onclick="removeAsset(${a.id})">Sil</button></td>
-    </tr>`).join('');
-    $('#assets').innerHTML = rows || '<tr><td colspan="8" class="empty">Sepet henüz tanımlanmadı. Varlıklarını ekleyerek başla.</td></tr>';
+    renderWatchlist(d.assets);
+    renderBasket(d.assets);
+    $('#assetSearch').value = d.assets.find(a => String(a.id) === selected)?.symbol || '';
     if (selected) await window.loadSignalChart(selected);
     const selectedAsset = d.assets.find(a => String(a.id) === selected);
     if (selectedAsset && $('#instrumentSub')) $('#instrumentSub').textContent = `${selectedAsset.market} · ${selectedAsset.currency} · ${roleTR[selectedAsset.role] || selectedAsset.role} · Günlük kapanış`;
+    const instrumentLogo = $('#instrumentLogo');
+    if (instrumentLogo) {
+      instrumentLogo.hidden = !selectedAsset;
+      if (selectedAsset) {
+        instrumentLogo.src = logoURL(selectedAsset);
+        instrumentLogo.dataset.logoSymbol = selectedAsset.symbol;
+        instrumentLogo.dataset.logoMarket = selectedAsset.market || '';
+        instrumentLogo.dataset.logoFallback = 'pending';
+        instrumentLogo.onload = () => window.scheduleLogoRefresh(instrumentLogo);
+        instrumentLogo.onerror = () => window.fallbackLogo(instrumentLogo);
+      }
+    }
     const st = d.settings;
     for (const key of ['initial_capital_usd', 'monthly_contribution_usd', 'fees_bps', 'slippage_bps', 'forward_start']) {
       const input = $(`[name="${key}"]`);
@@ -142,6 +266,7 @@ async function load() {
     $('#backtest').textContent = `${bt.message} Veri aralığı: ${dateTR(bt.data_range[0])} – ${dateTR(bt.data_range[1])}.`;
     const tg = await api('/api/telegram/preview');
     if (tg.preview) $('#telegramPreview').textContent = telegramTR(tg.preview);
+    setView(location.hash === '#basket' ? 'basket' : location.hash === '#watchlist' ? 'watchlist' : 'overview', false);
   } catch (error) {
     console.error(error);
   }
@@ -160,7 +285,7 @@ function renderSignalTable(asOf = new Date().toISOString()) {
     const periodClass = row.timeframe === '1W' || row.timeframe === 'W' ? 'signal-period-weekly' : 'signal-period-daily';
     const actionClass = row.action === 'AL' ? 'signal-action-buy' : 'signal-action-sell';
     return `<tr>
-      <td><span class="signal-asset">${esc(asset.symbol)}</span><span class="signal-market">${esc(roleTR[asset.role] || asset.role)}</span></td>
+      <td><span class="signal-asset-cell">${imageHTML(asset, 'signal-logo')}<span><b class="signal-asset">${esc(asset.symbol)}</b><small class="signal-market">${esc(roleTR[asset.role] || asset.role)}</small></span></span></td>
       <td class="${periodClass}">${timeframeTR(row.timeframe)}</td>
       <td><span class="signal-action ${actionClass}">${row.action}</span></td>
       <td class="signal-date">${dateTR(row.signal_date)}</td>
@@ -176,6 +301,7 @@ window.removeAsset = async id => {
 };
 window.openAssetChart = id => {
   $('#chartAsset').value = String(id);
+  setView('overview');
   load();
   $('.chart-column').scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
@@ -193,7 +319,39 @@ async function watchFirstPriceLoad(assetId) {
 $('#addOpen').onclick = () => $('#assetDialog').showModal();
 $('#basketAdd').onclick = () => $('#assetDialog').showModal();
 $('#closeDialog').onclick = $('#cancelDialog').onclick = () => $('#assetDialog').close();
-$('#assetSearch').addEventListener('input', applyAssetSearch);
+$('#assetSearch').addEventListener('input', event => {
+  const query = event.target.value.trim();
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => searchInstruments(query), 250);
+});
+$('#assetSearch').addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeInstrumentSearch();
+  if (event.key === 'Enter') {
+    const first = $('#assetSearchResults').querySelector('.instrument-result');
+    if (first) { event.preventDefault(); first.click(); }
+  }
+});
+document.addEventListener('click', event => {
+  if (!event.target.closest('.instrument-search')) closeInstrumentSearch();
+});
+document.querySelectorAll('.side-link').forEach(link => link.addEventListener('click', event => {
+  event.preventDefault();
+  setView(link.dataset.view);
+}));
+document.querySelector('.strategy-link').addEventListener('click', event => {
+  event.preventDefault();
+  setView('overview');
+  $('#settings').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+window.addEventListener('hashchange', () => {
+  setView(location.hash === '#basket' ? 'basket' : location.hash === '#watchlist' ? 'watchlist' : 'overview', false);
+});
+$('#basketSearch').addEventListener('input', () => renderBasket(portfolioAssets));
+document.querySelectorAll('.sort-button').forEach(button => button.addEventListener('click', () => {
+  if (basketSort.key === button.dataset.sort) basketSort.direction *= -1;
+  else basketSort = { key: button.dataset.sort, direction: 1 };
+  renderBasket(portfolioAssets);
+}));
 $('#assetForm').onsubmit = async event => {
   event.preventDefault();
   const payload = Object.fromEntries(new FormData(event.target));
@@ -206,15 +364,11 @@ $('#assetForm').onsubmit = async event => {
   delete payload.rsi_period; delete payload.buy_zone_max; delete payload.weekly_brake_drawdown_pct;
   try {
     const added = await api('/api/assets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    event.target.reset(); $('#assetDialog').close(); load(); watchFirstPriceLoad(added.id);
+    event.target.reset(); $('#assetDialog').close(); $('#chartAsset').value = String(added.id); setView('overview'); load(); watchFirstPriceLoad(added.id);
   } catch (error) { alert(error.message); }
 };
 
 $('#chartAsset').addEventListener('change', () => load());
-$('#chartAsset').addEventListener('change', () => {
-  const value = $('#chartAsset').value;
-  $('#assetPicker').querySelectorAll('.asset-card').forEach(card => { const active = card.dataset.assetId === value; card.classList.toggle('selected', active); card.setAttribute('aria-pressed', String(active)); });
-});
 $('#chartInterval').addEventListener('change', () => window.loadSignalChart($('#chartAsset').value));
 $('#chartStyle').addEventListener('change', () => window.loadSignalChart($('#chartAsset').value));
 $('#chartRange').addEventListener('change', () => window.setChartRange?.($('#chartRange').value));
