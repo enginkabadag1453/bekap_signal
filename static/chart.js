@@ -115,7 +115,7 @@
     if (chartState.instance) { chartState.instance.remove(); chartState.instance = null; }
     host.replaceChildren();
     const chart = LightweightCharts.createChart(host, {
-      autoSize: true, layout: { background: { type: 'solid', color: bg }, textColor: fg, attributionLogo: true, fontFamily: 'Arial, sans-serif', fontSize: 11 },
+      autoSize: true, layout: { background: { type: 'solid', color: bg }, textColor: fg, attributionLogo: true, fontFamily: 'Segoe UI, Arial, sans-serif', fontSize: 12 },
       grid: { vertLines: { color: grid }, horzLines: { color: grid } },
       rightPriceScale: { borderColor: border, scaleMargins: { top: .08, bottom: .12 }, entireTextOnly: true },
       timeScale: { borderColor: border, rightOffset: 5, barSpacing: 7, timeVisible: false, secondsVisible: false, tickMarkFormatter: t => dateText(t) },

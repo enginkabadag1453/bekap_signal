@@ -7,13 +7,14 @@
 .signal-table-count{font:10px Consolas,monospace;color:var(--muted);white-space:nowrap}
 .signal-table-count b{font-size:13px;color:var(--text)}
 .signal-table-tools select{height:32px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);color:var(--text);font-size:10px}
-.signal-table-wrap{width:100%;overflow:auto}
+.signal-table-wrap{width:100%;max-height:min(56vh,520px);overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
 .signal-table{width:100%;min-width:0;border-collapse:collapse;font-size:11px;table-layout:fixed}
-.signal-table th{padding:11px 8px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--line);color:var(--muted);font-size:8px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:var(--panel2)}
+.signal-table th{position:sticky;top:0;z-index:1;padding:11px 8px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--line);color:var(--muted);font-size:8px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:var(--panel2)}
 .signal-table td{padding:10px 8px;border-bottom:1px solid color-mix(in srgb,var(--line) 76%,transparent);white-space:nowrap;color:var(--soft);vertical-align:middle;font-size:10px}
 .signal-table tbody tr:last-child td{border-bottom:0}
 .signal-table tbody tr:hover{background:color-mix(in srgb,var(--cyan) 5%,var(--panel))}
 .signal-table .signal-asset{font-weight:800;letter-spacing:.04em;color:var(--text)}
+.signal-table-sub b{color:var(--text);font:10px Consolas,monospace}
 .signal-table .signal-market{display:block;margin-top:3px;color:var(--muted);font-size:9px}
 .signal-table .signal-number{font:11px Consolas,monospace;color:var(--text);font-variant-numeric:tabular-nums}
 .signal-table .signal-date,.signal-table .signal-data-date{font:10px Consolas,monospace;color:var(--muted)}
@@ -26,4 +27,4 @@
 .signal-table-footer b{font:10px Consolas,monospace;color:var(--soft)}
 @media(max-width:1250px){.workspace{grid-template-columns:minmax(0,1fr) minmax(290px,320px)}}
 @media(max-width:950px){.workspace{grid-template-columns:minmax(0,1fr)}#signal-panel.signal-inspector{display:flex}}
-@media(max-width:680px){.signal-table-heading{align-items:flex-start;flex-direction:column;padding:14px 12px;gap:11px}.signal-table-heading h2{font-size:14px}.signal-table-tools{width:100%;flex-wrap:wrap}.signal-table-tools select{flex:1}.signal-table-wrap{overflow-x:hidden}.signal-table th,.signal-table td{padding:10px 5px;font-size:9px}.signal-table-footer{padding:10px 12px;flex-direction:column;gap:5px}}
+@media(max-width:680px){.signal-table-heading{align-items:flex-start;flex-direction:column;padding:14px 12px;gap:11px}.signal-table-heading h2{font-size:14px}.signal-table-tools{width:100%;flex-wrap:wrap}.signal-table-tools select{flex:1}.signal-table-wrap{max-height:min(56vh,440px);overflow-x:auto}.signal-table{min-width:320px}.signal-table th,.signal-table td{padding:10px 5px;font-size:9px}.signal-table-footer{padding:10px 12px;flex-direction:column;gap:5px}}

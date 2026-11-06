@@ -2,6 +2,32 @@ const $ = s => document.querySelector(s);
 const roleTR = { lifetime: 'Ömürlük', trend: 'Trend', periodic: 'Dönemsel' };
 let signalTableRows = [];
 
+function applyAssetSearch() {
+  const input = $('#assetSearch');
+  const picker = $('#assetPicker');
+  if (!input || !picker) return;
+  const query = input.value.trim().toLocaleLowerCase('tr-TR');
+  const cards = [...picker.querySelectorAll('.asset-card')];
+  let matches = 0;
+  cards.forEach(card => {
+    const match = card.querySelector('.asset-symbol').textContent.toLocaleLowerCase('tr-TR').includes(query);
+    card.hidden = !match;
+    if (match) matches += 1;
+  });
+  let empty = picker.querySelector('#assetSearchEmpty');
+  if (query && matches === 0) {
+    if (!empty) {
+      empty = document.createElement('div');
+      empty.id = 'assetSearchEmpty';
+      empty.className = 'rail-empty';
+      picker.append(empty);
+    }
+    empty.textContent = `“${input.value.trim()}” için eşleşen varlık yok.`;
+  } else {
+    empty?.remove();
+  }
+}
+
 async function api(url, opts = {}) {
   const response = await fetch(url, opts);
   const data = await response.json();
@@ -63,11 +89,14 @@ async function load() {
     const d = await api('/api/overview');
     $('#assetCount').textContent = numberTR(d.assets.length);
     const signalLists = await Promise.all(d.assets.map(a => api(`/api/assets/${a.id}/signals`).catch(() => [])));
-    signalTableRows = d.assets.map((asset, index) => {
-      const latest = [...signalLists[index]].sort((a, b) => String(b.signal_date).localeCompare(String(a.signal_date)) || Number(b.id) - Number(a.id))[0];
-      const action = latest ? signalActionTR(latest.event) : null;
-      return latest && action ? { ...latest, action, asset } : null;
-    }).filter(Boolean).sort((a, b) => String(b.signal_date).localeCompare(String(a.signal_date)) || Number(b.id) - Number(a.id));
+    signalTableRows = d.assets.flatMap((asset, index) => signalLists[index]
+      .map(signal => {
+        const action = signalActionTR(signal.event);
+        return action ? { ...signal, action, asset } : null;
+      })
+      .filter(Boolean))
+      .sort((a, b) => String(b.signal_date).localeCompare(String(a.signal_date))
+        || String(a.asset.symbol).localeCompare(String(b.asset.symbol), 'tr') || Number(b.id) - Number(a.id));
     renderSignalTable(d.as_of);
     $('#version').textContent = String(d.strategy_version).replace(/(\d+)\.(\d+)\.(\d+)/, '$1,$2,$3');
     const ready = d.assets.filter(a => a.data_status === 'ok').length;
@@ -90,6 +119,7 @@ async function load() {
       $('#assetPicker').querySelectorAll('.asset-card').forEach(card => { const active = card === button; card.classList.toggle('selected', active); card.setAttribute('aria-pressed', String(active)); });
       load();
     }));
+    applyAssetSearch();
     const rows = d.assets.map(a => `<tr>
       <td class="symbol">${esc(a.symbol)}</td><td>${esc(a.market)}</td>
       <td><span class="role-tag">${roleTR[a.role]}</span></td>
@@ -119,8 +149,11 @@ async function load() {
 
 function renderSignalTable(asOf = new Date().toISOString()) {
   const filter = $('#signalFilter')?.value || 'ALL';
-  const rows = signalTableRows.filter(row => filter === 'ALL' || row.action === filter);
+  const newestDate = signalTableRows[0]?.signal_date || null;
+  const newestRows = newestDate ? signalTableRows.filter(row => row.signal_date === newestDate) : [];
+  const rows = newestRows.filter(row => filter === 'ALL' || row.action === filter);
   $('#signalCount').textContent = numberTR(rows.length);
+  $('#signalLatestDate').textContent = newestDate ? dateTR(newestDate) : '—';
   $('#signalUpdated').textContent = dateTimeTR(asOf);
   $('#signals').innerHTML = rows.length ? rows.map(row => {
     const asset = row.asset;
@@ -132,7 +165,7 @@ function renderSignalTable(asOf = new Date().toISOString()) {
       <td><span class="signal-action ${actionClass}">${row.action}</span></td>
       <td class="signal-date">${dateTR(row.signal_date)}</td>
     </tr>`;
-  }).join('') : `<tr><td colspan="4" class="empty">${filter === 'ALL' ? 'Şu anda sepetinizde teyit edilmiş AL veya SAT sinyali yok.' : `Şu anda teyit edilmiş ${filter} sinyali yok.`}</td></tr>`;
+  }).join('') : `<tr><td colspan="4" class="empty">${newestDate ? `En yeni tarih olan ${dateTR(newestDate)} için teyit edilmiş ${filter === 'ALL' ? 'AL veya SAT' : filter} sinyali yok.` : 'Sepette teyit edilmiş AL veya SAT sinyali yok.'}</td></tr>`;
 }
 
 window.removeAsset = async id => {
@@ -160,10 +193,7 @@ async function watchFirstPriceLoad(assetId) {
 $('#addOpen').onclick = () => $('#assetDialog').showModal();
 $('#basketAdd').onclick = () => $('#assetDialog').showModal();
 $('#closeDialog').onclick = $('#cancelDialog').onclick = () => $('#assetDialog').close();
-$('#assetSearch').addEventListener('input', event => {
-  const query = event.target.value.trim().toLocaleLowerCase('tr-TR');
-  $('#assetPicker').querySelectorAll('.asset-card').forEach(card => { card.hidden = !card.querySelector('.asset-symbol').textContent.toLocaleLowerCase('tr-TR').includes(query); });
-});
+$('#assetSearch').addEventListener('input', applyAssetSearch);
 $('#assetForm').onsubmit = async event => {
   event.preventDefault();
   const payload = Object.fromEntries(new FormData(event.target));

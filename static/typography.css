@@ -1,0 +1,127 @@
+/* Readable, consistent type scale and text contrast across the dashboard. */
+:root {
+  --text: #f1f5f9;
+  --soft: #d2dce6;
+  --muted: #a3b0bf;
+  --cyan: #7bc4ff;
+}
+
+:root[data-theme="light"] {
+  --text: #142232;
+  --soft: #405468;
+  --muted: #5d6e80;
+  --cyan: #1e67b0;
+}
+
+body {
+  font-size: clamp(14px, .82vw, 15px);
+  line-height: 1.5;
+}
+
+.brand b { font-size: 15px; }
+.brand small { font-size: 10px; }
+.topnav a { font-size: 13px; }
+.topright { font-size: 11px; }
+.market-date { font-size: 10px; }
+.market-date b { font-size: 12px; }
+.theme-toggle, .refresh-top { font-size: 12px; }
+
+.eyebrow { font-size: 10px; }
+.rail-head h1 { font-size: 18px; }
+.asset-count { font-size: 12px; }
+.asset-search input { font-size: 13px; }
+.primary, .secondary { font-size: 12px; }
+.asset-symbol { font-size: 14px; }
+.asset-price { font-size: 12px; }
+.asset-role { font-size: 11px; }
+.asset-status { font-size: 10.5px; }
+.rail-empty { font-size: 12px; }
+.data-health b { font-size: 11px; }
+.data-health small { font-size: 11px; line-height: 1.5; }
+.rail-bottom > a { font-size: 11.5px; }
+.strategy-version { font-size: 10.5px; }
+.strategy-version b { font-size: 11px; }
+
+.instrument-head h2 { font-size: 23px; }
+.instrument-sub, .quote span { font-size: 11.5px; }
+.quote b { font-size: 22px; }
+.chart-toolbar select, .tools-grid select, .tools-grid input,
+.formgrid input, .formgrid select { font-size: 12px; }
+.toolbar-toggle, .axis-options summary, .axis-menu legend,
+.axis-choice { font-size: 11px; }
+.chart-meta, .chart-legend, .chart-foot { font-size: 11px; }
+.chartplaceholder { font-size: 14px; }
+.chartplaceholder small { font-size: 12px; }
+.indicator-legend { font-size: 11px; }
+.indicator-legend b { font-size: 11px; }
+.indicator-axis-tag { font-size: 11px; line-height: 14px; }
+.signal-badge { font-size: 10.5px; line-height: 14px; padding: 4px 7px; }
+
+.inspector-head h2, .signal-table-heading h2 { font-size: 17px; }
+.timeframe-pill, .pill, .signal-buy { font-size: 10.5px; }
+.signal-item .signal-date, .inspector-count { font-size: 10.5px; }
+.signal-item b { font-size: 12px; }
+.signal-item p { font-size: 11.5px; line-height: 1.5; }
+.empty { font-size: 12px; }
+.inspector-stats small, .rsi-history small { font-size: 10px; }
+.inspector-stats b { font-size: 15px; }
+.rule-summary > div { font-size: 11px; }
+.rule-summary b, .rsi-history b { font-size: 11.5px; }
+.all-signals, .history-details summary { font-size: 11.5px; }
+.history-details summary span { font-size: 10.5px; }
+
+.section-title h2 { font-size: 17px; }
+.text-button { font-size: 11px; }
+th { font-size: 10.5px; }
+td { font-size: 12px; }
+.role-tag { font-size: 10.5px; }
+.row-actions button { font-size: 11px; }
+.tools-section > summary small { font-size: 10px; }
+.tools-section > summary b { font-size: 13px; }
+.tool-card .section-title h2 { font-size: 15px; }
+.rule-grid small { font-size: 10px; }
+.rule-grid b { font-size: 11px; }
+.callout, .muted, .settings-form label, .formgrid label,
+.tool-card form#uploadForm input[type=file], .tools-grid .callout,
+footer { font-size: 11px; }
+.telegram pre { font-size: 11px; }
+.dialoghead h2 { font-size: 20px; }
+.rsi-history b { line-height: 1.4; }
+
+.signal-table-sub { font-size: 11.5px; }
+.signal-table-sub b { font-size: 11.5px; }
+.signal-table-count { font-size: 11.5px; }
+.signal-table-tools select { font-size: 12px; }
+.signal-table { font-size: 12px; }
+.signal-table th { font-size: 9.5px; }
+.signal-table td { font-size: 11.5px; }
+.signal-table .signal-market { font-size: 10px; }
+.signal-table .signal-number, .signal-table .signal-date,
+.signal-table .signal-data-date { font-size: 11px; }
+.signal-action { font-size: 11px; }
+.signal-table-footer { font-size: 9.5px; }
+.signal-table-footer b { font-size: 11px; }
+
+@media (max-width: 1250px) {
+  .instrument-head h2 { font-size: 21px; }
+  .quote b { font-size: 20px; }
+}
+
+@media (max-width: 680px) {
+  body { font-size: 14px; }
+  .brand b { font-size: 13px; }
+  .brand small { font-size: 9px; }
+  .topnav a { font-size: 11.5px; }
+  .market-date { font-size: 9.5px; }
+  .theme-toggle, .refresh-top { font-size: 11px; }
+  .asset-symbol { font-size: 13px; }
+  .asset-role { font-size: 10.5px; }
+  .asset-status { font-size: 10px; }
+  .instrument-head h2 { font-size: 19px; }
+  .quote b { font-size: 18px; }
+  .chart-toolbar select, .toolbar-toggle { font-size: 11px; }
+  .chart-meta, .chart-legend, .chart-foot { font-size: 10px; }
+  .signal-table th { font-size: 9px; }
+  .signal-table td { font-size: 10.5px; }
+  .signal-table .signal-date { font-size: 10px; }
+}
