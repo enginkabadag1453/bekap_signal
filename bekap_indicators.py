@@ -17,6 +17,8 @@ def profile(symbol, market):
     ticker = {'BTC': 'BTCUSD', 'BTC-USD': 'BTCUSD', 'ETH-USD': 'ETHUSD'}.get(symbol, symbol)
     if market == 'XIST' and ticker.endswith('.IS'):
         ticker = ticker[:-3]
+    elif ticker.endswith('.TO'):
+        ticker = ticker[:-3]
     return {'ticker': ticker, 'custom': ticker in PARAMETERS, **PARAMETERS.get(ticker, DEFAULT)}
 
 

@@ -54,6 +54,19 @@ class MarketDataRegressionTests(unittest.TestCase):
         self.assertEqual(bars[0]["close"], 1364.73)
         self.assertEqual(bars[0]["volume"], 300.0)
 
+    def test_intraday_aggregation_can_include_only_current_partial_session(self):
+        meta = {"exchangeTimezoneName": "America/New_York"}
+        as_of = datetime(2026, 11, 6, 15, 30, tzinfo=timezone.utc)
+        timestamps = [ts("2026-11-05T20:00:00Z"), ts("2026-11-06T14:30:00Z"), ts("2026-11-06T15:15:00Z")]
+        quote = {"open": [10, 11, 12], "high": [11, 13, 14], "low": [9, 10, 11],
+                 "close": [10.5, 12, 13.5], "volume": [100, 200, 300]}
+        completed = app.aggregate_intraday_daily(timestamps, quote, meta, as_of)
+        with_live = app.aggregate_intraday_daily(timestamps, quote, meta, as_of, include_current=True)
+        self.assertEqual([bar["datetime"] for bar in completed], ["2026-11-05"])
+        self.assertEqual([bar["datetime"] for bar in with_live], ["2026-11-05", "2026-11-06"])
+        self.assertEqual(with_live[-1], {"datetime": "2026-11-06", "open": 11.0, "high": 14.0,
+                                         "low": 10.0, "close": 13.5, "volume": 500.0})
+
     def test_stale_daily_feed_is_completed_with_hourly_close(self):
         meta = {"exchangeTimezoneName": "America/New_York", "currency": "USD"}
         daily = {
@@ -76,7 +89,9 @@ class MarketDataRegressionTests(unittest.TestCase):
                                            "volume": [100.0, 200.0, 50.0]}]},
             }], "error": None}
         }
+        requests = []
         def fake_urlopen(request, timeout=0):
+            requests.append(request.full_url)
             body = hourly if "interval=60m" in request.full_url else daily
             return BytesIO(json.dumps(body).encode())
         with patch.object(app, "urlopen", side_effect=fake_urlopen), \
@@ -85,6 +100,7 @@ class MarketDataRegressionTests(unittest.TestCase):
         self.assertEqual(result["values"][-1]["datetime"], "2026-11-05")
         self.assertEqual(result["values"][-1]["close"], 1364.73)
         self.assertTrue(result["intraday_used"])
+        self.assertIn("range=10y&interval=1d", requests[0])
 
     def test_hourly_feed_does_not_replace_an_existing_daily_close(self):
         meta = {"exchangeTimezoneName": "America/New_York", "currency": "USD"}
@@ -156,7 +172,97 @@ class MarketDataRegressionTests(unittest.TestCase):
             payload = app.build_chart_payload(asset_id, "D")
             self.assertEqual(payload["bars"][-1]["close"], 305.0)
             self.assertEqual(payload["indicators"][-1]["sma200"], 205.5)
+            expected_ema = app.bekap_indicators.ema([101.0 + i for i in range(205)], 200)[-1]
+            self.assertAlmostEqual(payload["indicators"][-1]["ema200"], expected_ema)
             self.assertEqual(payload["indicators"][-1]["date"], payload["bars"][-1]["date"])
+
+    def test_live_partial_bar_updates_chart_but_is_not_confirmed_as_signal(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(app, "DB_PATH", Path(tmp) / "live-chart.sqlite3"), patch.object(app, "db", closed_db):
+            app.initialize()
+            with app.db() as con:
+                asset_id = con.execute("SELECT id FROM assets WHERE symbol='AAPL'").fetchone()[0]
+                bars = []
+                for i in range(205):
+                    close = 100.0 + i
+                    bars.append((asset_id, "1D", f"2026-{i//28+1:02d}-{i%28+1:02d}", close, close+2, close-2, close+1, 1000.0))
+                con.executemany("INSERT INTO bars(asset_id,timeframe,date,open,high,low,close,volume) VALUES(?,?,?,?,?,?,?,?)", bars)
+                con.execute("""INSERT INTO intraday_bars(asset_id,date,open,high,low,close,volume,updated_at)
+                    VALUES(?,?,?,?,?,?,?,?)""", (asset_id, "2026-11-10", 306, 317, 305, 316, 50000, "2026-11-10T10:00:00Z"))
+            with patch.object(app, "weekly_brake_events", return_value=[]) as events:
+                payload = app.build_chart_payload(asset_id, "D")
+            self.assertEqual(payload["bars"][-1]["date"], "2026-11-10")
+            self.assertEqual(payload["bars"][-1]["close"], 316)
+            self.assertTrue(payload["bars"][-1]["provisional"])
+            self.assertTrue(payload["current_daily_provisional"])
+            self.assertFalse(any(payload["indicators"][-1][key] for key in ("buy", "tp", "cross_up", "cross_down")))
+            self.assertEqual(payload["last_confirmed_daily_bar_date"], bars[-1][2])
+            self.assertEqual(events.call_args.args[0][-1]["date"], bars[-1][2])
+            weekly = app.build_chart_payload(asset_id, "W")
+            self.assertEqual(weekly["bars"][-1]["date"], "2026-11-09")
+            self.assertEqual(weekly["bars"][-1]["close"], 316)
+            self.assertTrue(weekly["current_bar_provisional"])
+            self.assertFalse(any(weekly["indicators"][-1][key] for key in ("buy", "tp", "cross_up", "cross_down")))
+
+    def test_intraday_refresh_only_updates_display_candles(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(app, "DB_PATH", Path(tmp) / "live-refresh.sqlite3"), patch.object(app, "db", closed_db):
+            app.initialize()
+            live = {"datetime": "2026-11-10", "open": 100, "high": 102, "low": 99,
+                    "close": 101, "volume": 500}
+            with patch.object(app, "fetch_yahoo_current_bar", return_value=live):
+                self.assertEqual(app.sync_intraday_bars(), 7)
+            with app.db() as con:
+                candles = con.execute("SELECT COUNT(*) FROM intraday_bars").fetchone()[0]
+                confirmed_bars = con.execute("SELECT COUNT(*) FROM bars").fetchone()[0]
+                signals = con.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+            self.assertEqual(candles, 7)
+            self.assertEqual(confirmed_bars, 0)
+            self.assertEqual(signals, 0)
+
+    def test_chart_draws_pine_ema200_instead_of_sma200(self):
+        chart_js = (app.ROOT / "static" / "chart.js").read_text(encoding="utf-8")
+        index_html = (app.ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("addLine(chart, rows, 'ema200'", chart_js)
+        self.assertNotIn("addLine(chart, rows, 'sma200'", chart_js)
+        self.assertIn('<span>EMA 200</span>', index_html)
+        self.assertNotIn('<span>SMA 200</span>', index_html)
+        self.assertIn("data.chart_signals || []", chart_js)
+        self.assertIn("data.strategy_signals || []", chart_js)
+        self.assertIn("signal-badge-below", chart_js)
+
+    def test_chart_bubbles_use_native_indicator_events_for_selected_timeframe(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(app, "DB_PATH", Path(tmp) / "signal-timeframe.sqlite3"), patch.object(app, "db", closed_db):
+            app.initialize()
+            with app.db() as con:
+                asset_id = con.execute("SELECT id FROM assets WHERE symbol='TUPRS'").fetchone()[0]
+                days = ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06"]
+                con.executemany("INSERT INTO bars(asset_id,timeframe,date,open,high,low,close,volume) VALUES(?,?,?,?,?,?,?,?)",
+                    [(asset_id, "1D", day, 100, 102, 98, 100, 1000) for day in days])
+            events = [
+                {"event": "buy_confirmed", "timeframe": "1D", "signal_date": "2026-11-03", "close_price": 100, "change_pct": -4.0},
+                {"event": "take_profit_confirmed", "timeframe": "1D", "signal_date": "2026-11-04", "close_price": 100, "change_pct": 5.0},
+                {"event": "buy_confirmed", "timeframe": "1W", "signal_date": "2026-11-06", "close_price": 100, "change_pct": -6.63},
+            ]
+            def fake_calculate(bars, symbol, market):
+                rows = []
+                for bar in bars:
+                    day = str(bar["date"])
+                    weekly_bar = len(bars) == 1
+                    rows.append({"date": day, "rsi": 35.0, "adx": 20.0,
+                                 "buy": day == "2026-11-03" or weekly_bar and day == "2026-11-02",
+                                 "tp": day == "2026-11-04" or weekly_bar and day == "2026-11-02",
+                                 "buy_diff": -6.0, "tp_diff": 10.0,
+                                 "last_buy": 100, "last_tp": 100, "cross_up": False, "cross_down": False})
+                return {"version": "test-v1", "profile": {}, "rows": rows}
+            with patch.object(app, "weekly_brake_events", return_value=events), patch.object(app.bekap_indicators, "calculate", side_effect=fake_calculate):
+                daily = app.build_chart_payload(asset_id, "D")
+                weekly = app.build_chart_payload(asset_id, "W")
+            self.assertEqual([event["timeframe"] for event in daily["strategy_signals"]], ["1D", "1D"])
+            self.assertEqual([event["timeframe"] for event in weekly["strategy_signals"]], ["1W"])
+            self.assertEqual(weekly["strategy_signals"][0]["chart_date"], "2026-11-02")
+            self.assertEqual([(event["timeframe"], event["signal_date"], event["event"]) for event in daily["chart_signals"]],
+                             [("1D", "2026-11-03", "buy_confirmed"), ("1D", "2026-11-04", "take_profit_confirmed")])
+            self.assertEqual([(event["timeframe"], event["signal_date"], event["event"]) for event in weekly["chart_signals"]],
+                             [("1W", "2026-11-02", "buy_confirmed"), ("1W", "2026-11-02", "take_profit_confirmed")])
 
     def test_weekly_chart_shows_current_partial_week_without_confirming_signals(self):
         class FrozenDate(date):

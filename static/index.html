@@ -4,10 +4,10 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#0b1016"><title>BEKAP · Sinyal Araştırma Masası</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/style.css?v=2">
+  <link rel="stylesheet" href="/static/style.css?v=3">
   <link rel="stylesheet" href="/static/signals.css?v=4">
   <link rel="stylesheet" href="/static/typography.css?v=1">
-  <link rel="stylesheet" href="/static/product.css?v=1">
+  <link rel="stylesheet" href="/static/product.css?v=13">
 </head>
 <body>
   <header class="topbar">
@@ -16,11 +16,22 @@
   </header>
   <div class="app-shell" id="top">
     <aside class="app-sidebar" aria-label="Çalışma alanı menüsü">
-      <p class="eyebrow sidebar-label">ÇALIŞMA ALANI</p>
+      <section class="sidebar-profile" aria-label="Finansal analiz çalışma alanı">
+        <div class="sidebar-profile-heading">
+          <div class="sidebar-profile-name"><b>E.KABADAĞ</b><span>FİNANSAL ANALİZ</span></div>
+          <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-expanded="true" aria-label="Kenar çubuğunu gizle"><span class="sidebar-toggle-icon">❮</span><span class="sidebar-toggle-label">GİZLE</span></button>
+        </div>
+        <time class="sidebar-date" id="sidebarDate"></time>
+        <div class="sidebar-clocks">
+          <div class="sidebar-clock"><span class="sidebar-flag" aria-hidden="true"><svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg"><rect width="1200" height="800" fill="#E30A17"/><circle cx="425" cy="400" r="200" fill="#ffffff"/><circle cx="475" cy="400" r="160" fill="#E30A17"/><polygon fill="#ffffff" points="583.334,400 764.235,458.779 652.431,304.894 652.431,495.106 764.235,341.221"/></svg></span><span class="sidebar-clock-copy"><small>TÜRKİYE</small><time id="turkeyClock">--:--:--</time></span></div>
+          <div class="sidebar-clock"><span class="sidebar-flag" aria-hidden="true"><svg viewBox="0 0 7410 3900" xmlns="http://www.w3.org/2000/svg"><rect width="7410" height="3900" fill="#b22234"/><path d="M0,450H7410m0,600H0m0,600H7410m0,600H0m0,600H7410m0,600H0" stroke="#fff" stroke-width="300"/><rect width="2964" height="2100" fill="#3c3b6e"/><g fill="#fff"><g id="s18"><g id="s9"><g id="s5"><g id="s4"><path id="s" d="M247,90 317.534230,307.082039 132.873218,172.917961H361.126782L176.465770,307.082039z"/><use href="#s" y="420"/><use href="#s" y="840"/><use href="#s" y="1260"/></g><use href="#s" y="1680"/></g><use href="#s4" x="247" y="210"/></g><use href="#s9" x="494"/></g><use href="#s18" x="988"/><use href="#s9" x="1976"/><use href="#s5" x="2470"/></g></svg></span><span class="sidebar-clock-copy"><small>ABD</small><time id="usClock">--:--:--</time></span></div>
+        </div>
+      </section>
       <nav class="side-menu" aria-label="Ana bölümler">
         <a class="side-link active" href="#overview" data-view="overview"><span class="side-icon">◫</span><span>Genel Bakış</span></a>
-        <a class="side-link" href="#basket" data-view="basket"><span class="side-icon">▦</span><span>Sepet</span></a>
+        <a class="side-link" href="#universe" data-view="universe"><span class="side-icon">▦</span><span>HİSSE - ETF EVRENİ</span></a>
         <a class="side-link" href="#watchlist" data-view="watchlist"><span class="side-icon">☆</span><span>İzleme Listesi</span><b id="assetCount">0</b></a>
+        <a class="side-link" href="#portfolio" data-view="portfolio"><span class="side-icon">💼</span><span>İşlemlerim &amp; Portföy</span><span class="nav-badge" style="padding:1px 6px;border-radius:4px;font-size:9.5px;font-weight:700;background:rgba(47,211,154,0.15);color:#2fd39a;border:1px solid rgba(47,211,154,0.4)">YENİ</span></a>
       </nav>
       <div class="sidebar-status"><div class="data-health"><span class="health-dot"></span><b id="dataState">Veri durumu yükleniyor</b><small id="dataInfo">Fiyat verisi eşitleniyor.</small><div class="progress"><i id="progress"></i></div></div><a href="#settings" class="strategy-link" data-view="overview">Strateji laboratuvarı <span>↗</span></a><small class="strategy-version">Sürüm <b id="version">0,1,0</b></small></div>
     </aside>
@@ -43,19 +54,19 @@
             <select id="chartStyle" aria-label="Grafik türü"><option value="candle" selected>Mum</option><option value="line">Çizgi</option></select>
             <select id="chartRange" aria-label="Grafik geçmiş aralığı"><option value="5Y">5 yıl</option><option value="1Y" selected>1 yıl</option><option value="6M">6 ay</option><option value="3M">3 ay</option><option value="1M">1 ay</option></select>
             <label class="toolbar-toggle"><input id="chartBB" type="checkbox" checked><span>Bollinger</span></label>
-            <label class="toolbar-toggle"><input id="chartSma" type="checkbox" checked><span>SMA 200</span></label>
+            <label class="toolbar-toggle"><input id="chartEma" type="checkbox" checked><span>EMA 200</span></label>
             <label class="toolbar-toggle"><input id="chartLevels" type="checkbox" checked><span>Yatay çizgiler</span></label>
             <label class="toolbar-toggle"><input id="chartSignals" type="checkbox" checked><span>AL-SAT kutucukları</span></label>
           </div>
           <div id="indicatorLegend" class="indicator-legend" aria-live="polite"></div>
           <div id="chart" class="chartbox"><div class="chartplaceholder">Sepetten varlık seçerek grafiği aç.</div></div>
           <div id="chartLegend" class="chart-legend">Mum üzerine gelerek kapanış, RSI ve ADX değerlerini incele.</div>
-          <div class="chart-foot"><span><i class="key-price"></i> Fiyat</span><span><i class="key-bands"></i> Bollinger</span><span><i class="key-buy"></i> EKLE</span><span><i class="key-sell"></i> KÂR AL</span><span><i class="key-sma"></i> SMA 200</span><span class="auto-note">Grafik ve sinyaller aynı kapanmış mum verisini kullanır.</span></div>
+          <div class="chart-foot"><span><i class="key-price"></i> Fiyat</span><span><i class="key-bands"></i> Bollinger</span><span><i class="key-buy"></i> EKLE</span><span><i class="key-sell"></i> KÂR AL</span><span><i class="key-sma"></i> EMA 200</span><span class="auto-note">Grafik ve sinyaller aynı kapanmış mum verisini kullanır.</span></div>
           <details class="history-details" id="signal-history"><summary>Seçili varlığın sinyal geçmişi <span>Ayrıntıları aç</span></summary><div id="detailSignals" class="detail-list"></div></details>
         </div>
         <aside class="signal-inspector" id="signal-panel">
           <div class="signal-table-heading">
-            <div><p class="eyebrow">PİYASA TARAMASI</p><h2>En yeni tarihli sinyaller</h2><p class="signal-table-sub">En yeni sinyal tarihi <b id="signalLatestDate">—</b> · yalnızca bu tarihteki teyitli olaylar</p></div>
+            <div><p class="eyebrow">PİYASA TARAMASI</p><h2>En yeni tarihli sinyaller</h2><p class="signal-table-sub">En yeni sinyal tarihi <b id="signalLatestDate">—</b> · bu tarihteki tüm AL / SAT olayları</p></div>
             <div class="signal-table-tools"><span class="signal-table-count"><b id="signalCount">0</b> sinyal</span><select id="signalFilter" aria-label="Sinyal türüne göre filtrele"><option value="ALL">Tüm sinyaller</option><option value="AL">AL</option><option value="SAT">SAT</option></select><button class="secondary" id="signalRefresh" type="button">⟳ Yenile</button></div>
           </div>
           <div class="signal-table-wrap"><table class="signal-table"><thead><tr><th>Varlık</th><th>Aralık</th><th>Sinyal</th><th>Tarih</th></tr></thead><tbody id="signals"><tr><td colspan="4" class="empty">Sinyaller yükleniyor…</td></tr></tbody></table></div>
@@ -73,6 +84,19 @@
         </div>
       </details>
       <footer>BEKAP kurallarından uyarlama · Kişisel araştırma aracı · Emir göndermez · Veriler sağlayıcı gecikmesine tabi olabilir</footer>
+      </section>
+
+      <section class="page-view universe-view" id="universe" data-view-page="universe" hidden>
+        <div class="section-title"><div><p class="eyebrow">SABİT ENSTRÜMAN EVRENİ</p><h2>Hisse - ETF Evreni</h2><p class="section-subtitle">8765’teki 1.179 Hisse + bekapyatirim.com’dan 312 ABD ETF’si (BEKAP Hayat Çizgisi sınıflandırmalı 1.491 kayıt)</p></div><span id="universeResultCount" class="table-result-count">Evren yükleniyor…</span></div>
+        <div class="table-tools universe-tools">
+          <label class="table-search"><span>⌕</span><input id="universeSearch" type="search" placeholder="Şirket, sembol, ETF veya tema ara" aria-label="Hisse - ETF evreninde ara"></label>
+          <label class="universe-filter">Piyasa<select id="universeMarket"><option value="">Tüm piyasalar</option><option value="US">ABD</option><option value="DE">Almanya</option><option value="TR">Türkiye</option></select></label>
+          <label class="universe-filter">Sıralama<select id="universeSort"><option value="rate">Yıllık eğim · yüksekten</option><option value="source">Kaynak sırası</option><option value="name">Şirket adı</option><option value="symbol">Sembol</option></select></label>
+          <div class="universe-categories universe-types" role="group" aria-label="Enstrüman türüne göre filtrele"><button type="button" data-universe-type="" class="selected">Tüm türler</button><button type="button" data-universe-type="stock">Hisse</button><button type="button" data-universe-type="etf">ETF</button></div>
+          <div class="universe-categories" role="group" aria-label="Kaynak sınıfına göre filtrele"><button type="button" data-universe-category="" class="selected">Tümü</button><button type="button" data-universe-category="life">Ömürlük</button><button type="button" data-universe-category="trend">Trend boyunca</button><button type="button" data-universe-category="seasonal">Dönemsel</button></div>
+        </div>
+        <div class="tablewrap universe-table-wrap"><table class="basket-table universe-table"><thead><tr><th>Varlık</th><th>Fiyat</th><th>Günlük değişim</th><th>Rol</th><th>Hedef / üst ağırlık</th><th>Son AL/SAT</th><th>Sinyal tarihi</th><th>Veri tarihi</th><th></th></tr></thead><tbody id="universeRows"><tr><td colspan="9" class="empty">Sabit evren yükleniyor…</td></tr></tbody></table></div>
+        <div class="table-bottom universe-pagination"><span id="universePageInfo"></span><div><button class="secondary" type="button" id="universePrevious">Önceki</button><span id="universePageNumber"></span><button class="secondary" type="button" id="universeNext">Sonraki</button></div></div>
       </section>
 
       <section class="page-view basket-section" id="basket" data-view-page="basket" hidden>
@@ -93,12 +117,261 @@
       </section>
 
       <section class="page-view watchlist-view" id="watchlist" data-view-page="watchlist" hidden>
-        <div class="section-title"><div><p class="eyebrow">İZLEME LİSTESİ</p><h2>Takip edilen hisseler ve ETF’ler</h2><p class="section-subtitle">Varlık seçerek grafiğine ve sinyallerine geç.</p></div><button class="primary" type="button" id="addOpen">＋ Varlık ekle</button></div>
+        <div class="section-title"><div><p class="eyebrow">İZLEME LİSTESİ</p><h2>Takip edilen hisseler ve ETF’ler</h2><p class="section-subtitle">Varlık seçerek grafiğine ve sinyallerine geç.</p></div><div class="watchlist-header-actions"><button class="secondary" type="button" id="removeOpen">－ Listeden çıkar</button><button class="primary" type="button" id="addOpen">＋ Varlık ekle</button></div></div>
         <div id="assetPicker" class="watchlist-grid"><div class="rail-empty">İzleme listesi hazırlanıyor…</div></div>
       </section>
+
+      <section class="page-view portfolio-view" id="portfolio" data-view-page="portfolio" hidden>
+        <!-- Header -->
+        <div class="portfolio-header">
+          <div>
+            <p class="eyebrow">PORTFÖY VE İŞLEMLER</p>
+            <h2>İşlemlerim &amp; Portföy Masası</h2>
+            <p class="section-subtitle">5 temel bilgiyle gerçek işlem kaydı · BKP-FON ve Hisse Getiri Karnesi</p>
+          </div>
+          <div class="portfolio-macro-rates" id="portfolioMacroRates">
+            <span class="macro-pill">USD/TRY: <b id="portUsdTry">—</b></span>
+            <span class="macro-pill">GRAM ALTIN: <b id="portGoldTry">—</b></span>
+            <span class="macro-pill">AYLIK TÜFE: <b id="portCpi">%2,88</b></span>
+          </div>
+        </div>
+
+        <!-- 1. HIZLI KAYIT BARI -->
+        <div class="port-entry-card">
+          <div class="port-entry-header">
+            <span class="port-badge-step">5 ADIMDA HIZLI KAYIT</span>
+            <span class="port-entry-desc">Kod, Tarih, Yön, Fiyat ve Adet girin; borsa, kur ve BEKAP sinyali otomatik bağlanır.</span>
+          </div>
+          <form id="portfolioTradeForm" class="port-entry-grid">
+            <div class="port-field">
+              <label>1. HİSSE / ETF KODU</label>
+              <div class="port-input-wrap">
+                <input id="tradeSymbol" type="text" placeholder="örn. THYAO, AAPL, SHOP.TO" required autocomplete="off" class="mono uppercase">
+                <div id="tradeSymbolDropdown" class="trade-dropdown" hidden></div>
+              </div>
+            </div>
+            <div class="port-field">
+              <label>2. İŞLEM TARİHİ</label>
+              <div class="port-date-wrap">
+                <input id="tradeDate" type="text" placeholder="GG.AA.YYYY" required class="mono">
+                <input id="tradeDatePicker" type="date" class="hidden-date-picker" tabindex="-1">
+                <button type="button" id="tradeCalBtn" class="port-cal-btn" title="Takvimden Seç">📅</button>
+              </div>
+            </div>
+            <div class="port-field">
+              <label>3. İŞLEM YÖNÜ</label>
+              <div class="port-side-toggle">
+                <button type="button" class="side-btn buy selected" data-side="BUY">● ALIŞ</button>
+                <button type="button" class="side-btn sell" data-side="SELL">SATIŞ</button>
+                <input type="hidden" id="tradeSide" value="BUY">
+              </div>
+            </div>
+            <div class="port-field">
+              <label>4. İŞLEM FİYATI <span id="tradeCurrencyBadge" class="curr-badge">TRY</span></label>
+              <input id="tradePrice" type="number" step="any" min="0.0001" placeholder="0,00" required class="mono">
+            </div>
+            <div class="port-field">
+              <label>5. ADET (LOT)</label>
+              <input id="tradeQuantity" type="number" step="any" min="0.0001" placeholder="0" required class="mono">
+            </div>
+            <div class="port-field auto-tot-field">
+              <label>OTOMATİK İŞLEM TUTARI</label>
+              <div class="port-auto-total">
+                <span id="tradeTotalPreview" class="mono up">0,00 ₺</span>
+              </div>
+            </div>
+            <div class="port-field submit-field">
+              <label>&nbsp;</label>
+              <button type="submit" id="saveTradeBtn" class="port-btn-save">💾 HAFIZAYA KAYDET</button>
+            </div>
+          </form>
+          <div id="tradeValidationBanner" class="trade-validation-banner" hidden></div>
+          <div class="port-opt-toggle-row">
+            <button type="button" id="toggleNotesBtn" class="btn-ghost-opt">+ Opsiyonel: Not / Komisyon Ekle</button>
+            <div id="tradeNotesWrap" class="trade-notes-wrap" hidden>
+              <input id="tradeNotes" type="text" placeholder="İsteğe bağlı kısa not (örn. 1. kademe alım, kâr satışı)">
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. TEK ENSTRÜMAN OLARAK PORTFÖY HERO KARTI (BKP-FON) -->
+        <div class="hero-fund-card" id="fundHeroCard">
+          <!-- Col 1: Meta -->
+          <div class="fund-card-meta">
+            <div class="fund-badge-row">
+              <span class="fund-badge-tag">🏆 TEK ENSTRÜMAN · BKP-FON</span>
+              <span id="fundOpenCount" class="fund-open-badge mono">0 Açık Pozisyon</span>
+            </div>
+            <div class="fund-card-val mono" id="fundTotalVal">0,00 ₺</div>
+            <div class="fund-card-sub">
+              <div class="fund-sub-row"><span>Dolar Karşılığı:</span><strong class="mono" id="fundValUsd">$0 USD</strong></div>
+              <div class="fund-sub-row"><span>Gram Altın Karşılığı:</span><strong class="mono gold-color" id="fundValGold">0,0 Gram</strong></div>
+              <div class="fund-sub-row dashed-top"><span>Bağlanan Maliyet:</span><span class="mono" id="fundTotalCost">0,00 ₺</span></div>
+              <div class="fund-sub-row"><span>Toplam Net Kazanç:</span><span class="mono" id="fundTotalGain">0,00 ₺ (%0,00)</span></div>
+            </div>
+          </div>
+
+          <!-- Col 2: 100 Bazlı Kıyas Grafiği -->
+          <div class="fund-card-chart">
+            <div class="fund-chart-head">
+              <span class="chart-caption">BKP-FON PERFORMANS KIYAS EĞRİSİ (BAŞLANGIÇ = 100 BAZ)</span>
+              <div class="fund-chart-legend">
+                <span><i style="background:#00e5ff;box-shadow:0 0 6px #00e5ff"></i>BKP-FON</span>
+                <span><i style="background:#fbbf24;box-shadow:0 0 6px #fbbf24"></i>Gr Altın</span>
+                <span><i style="background:#10b981;box-shadow:0 0 6px #10b981"></i>Dolar</span>
+                <span><i style="background:#f97316;box-shadow:0 0 6px #f97316"></i>TÜFE</span>
+              </div>
+            </div>
+            <div class="fund-svg-wrap" id="fundSvgContainer">
+              <svg id="fundCurveSvg" viewBox="0 0 540 100" width="100%" height="88"></svg>
+            </div>
+          </div>
+
+          <!-- Col 3: Tüm Portföyün 4'lü Çubukları -->
+          <div class="fund-card-bars">
+            <div class="fund-bars-title">TÜM PORTFÖYÜN GETİRİ KARNESİ</div>
+            <div class="port-bars-grid" id="fundBarsContainer">
+              <!-- Injected by JS -->
+            </div>
+          </div>
+
+          <!-- Col 4: Sepet Nabzı -->
+          <div class="fund-card-pulse">
+            <div class="pulse-box">
+              <span class="pulse-lb">BEKAP SEPET NABZI</span>
+              <span class="tag t-g" id="pulseHealthTag">Dengeli</span>
+            </div>
+            <div class="pulse-detail" id="pulseDetailText">
+              0 KÂR AL · 0 YENİ EKLE · 0 TUT
+            </div>
+            <div class="pulse-box">
+              <span class="pulse-lb">REEL ALFA (TÜFE ÜSTÜ)</span>
+              <span class="pulse-val mono up" id="fundReelAlfa">+%0,00 Net</span>
+            </div>
+            <div class="pulse-box">
+              <span class="pulse-lb">EN BÜYÜK POZİSYON</span>
+              <span class="pulse-val mono" id="fundMaxPos">—</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. AÇIK POZİSYONLAR TABLOSU (STİL 3 FORMATINDA) -->
+        <div class="port-table-panel">
+          <div class="port-table-head">
+            <div class="port-table-title">AÇIK POZİSYONLARIM — HER HİSSE İÇİN 4'LÜ GETİRİ ÇUBUKLARI</div>
+            <div class="port-table-legend">
+              <span><i style="background:#00d2ff;box-shadow:0 0 6px #00d2ff"></i>Nominal</span>
+              <span><i style="background:#fbbf24;box-shadow:0 0 6px #fbbf24"></i>Reel (TÜFE)</span>
+              <span><i style="background:#10b981;box-shadow:0 0 6px #10b981"></i>Dolar</span>
+              <span><i style="background:#f59e0b;box-shadow:0 0 6px #f59e0b"></i>Gram Altın</span>
+              <span><i style="background:#ff416c;box-shadow:0 0 6px #ff416c"></i>Negatif K/Z</span>
+              <span class="mono" style="color:var(--dim)">| Çizgi = %0 Başabaş</span>
+            </div>
+          </div>
+          <div class="tablewrap">
+            <table class="port-table-style3">
+              <thead>
+                <tr>
+                  <th style="width:230px">POZİSYON</th>
+                  <th style="width:190px">FİYAT &amp; MALİYET</th>
+                  <th style="width:450px">GETİRİ KARNESİ · NOMİNAL / REEL / DOLAR / ALTIN</th>
+                  <th style="width:160px">NOMİNAL K/Z</th>
+                  <th style="width:190px">DEĞER &amp; AĞIRLIK</th>
+                  <th style="width:170px">BEKAP SİNYALİ</th>
+                  <th style="text-align:right">İŞLEM</th>
+                </tr>
+              </thead>
+              <tbody id="portfolioPositionsBody">
+                <tr><td colspan="7" class="empty">Portföyde açık işlem kaydı bulunmuyor. Yukarıdaki formdan ilk işleminizi girin.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="port-table-foot">
+            <div class="foot-left">
+              <span class="foot-strong">Hafıza &amp; Muhasebe:</span>
+              <span>Tüm alım-satım kayıtları <code>bekap.sqlite3</code> içinde tutulur. Yapılan düzenleme ve silmeler anında portföy maliyetlerine yansır.</span>
+            </div>
+            <div class="foot-right">
+              <span class="mono" style="color:#9ccbff">Cebe Giren Realize Kâr: <strong id="fundRealizedPnl">0,00 ₺</strong></span>
+              <button type="button" id="toggleLedgerBtn" class="btn-ghost-ledger">📜 İşlem Geçmişi Defteri Aç ▾</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. İŞLEM GEÇMİŞİ DEFTERİ (KATLANABİLİR / AÇILIR) -->
+        <div class="port-ledger-panel" id="portfolioLedgerPanel" hidden>
+          <div class="port-ledger-head">
+            <div class="port-table-title">🗂️ HAFIZADAKİ İŞLEM GEÇMİŞİM (ALIM &amp; SATIM DEFTERİ)</div>
+            <span class="port-ledger-sub">Herhangi bir yanlış girişi tek tıkla düzenleyebilir veya silebilirsiniz</span>
+          </div>
+          <div class="tablewrap">
+            <table class="port-ledger-table">
+              <thead>
+                <tr>
+                  <th>TARİH</th>
+                  <th>YÖN</th>
+                  <th>HİSSE</th>
+                  <th>FİYAT</th>
+                  <th>ADET</th>
+                  <th>İŞLEM TUTARI</th>
+                  <th>O GÜNKÜ USD/TRY</th>
+                  <th>O GÜNKÜ GR ALTIN</th>
+                  <th>NOTLAR</th>
+                  <th style="text-align:right">KONTROL</th>
+                </tr>
+              </thead>
+              <tbody id="portfolioTradesBody">
+                <tr><td colspan="10" class="empty">Henüz kaydedilmiş işlem geçmişi yok.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- DÜZENLEME DİYALOĞU (MODAL) -->
+      <dialog id="editTradeDialog">
+        <form id="editTradeForm">
+          <div class="dialoghead">
+            <div>
+              <p class="eyebrow">İŞLEM GEÇMİŞİNİ DÜZENLE</p>
+              <h2>İşlem Kaydını Güncelle</h2>
+            </div>
+            <button type="button" class="x" id="closeEditTradeDialog" aria-label="Kapat">×</button>
+          </div>
+          <input type="hidden" id="editTradeId">
+          <div class="formgrid">
+            <label>Hisse Kodu
+              <input id="editTradeSymbol" required class="mono uppercase">
+            </label>
+            <label>İşlem Tarihi (GG.AA.YYYY)
+              <input id="editTradeDate" required class="mono">
+            </label>
+            <label>İşlem Yönü
+              <select id="editTradeSide">
+                <option value="BUY">ALIŞ</option>
+                <option value="SELL">SATIŞ</option>
+              </select>
+            </label>
+            <label>Birim Fiyat
+              <input id="editTradePrice" type="number" step="any" min="0.0001" required class="mono">
+            </label>
+            <label>Adet (Lot)
+              <input id="editTradeQuantity" type="number" step="any" min="0.0001" required class="mono">
+            </label>
+            <label class="wide">Not / Kademe Açıklaması
+              <input id="editTradeNotes" placeholder="İsteğe bağlı not">
+            </label>
+          </div>
+          <div class="dialogactions">
+            <button type="button" class="secondary" id="cancelEditTradeDialog">Vazgeç</button>
+            <button class="primary" type="submit">Güncelle ve Kaydet</button>
+          </div>
+        </form>
+      </dialog>
     </main>
   </div>
 
-  <dialog id="assetDialog"><form id="assetForm"><div class="dialoghead"><div><p class="eyebrow">SEPET SÖZLEŞMESİ</p><h2>Varlık ekle</h2></div><button type="button" class="x" id="closeDialog" aria-label="Kapat">×</button></div><div class="formgrid"><label>Sembol<input name="symbol" placeholder="örn. AAPL" required maxlength="32"></label><label>Piyasa<input name="market" placeholder="NASDAQ / BIST / KRİPTO" required></label><label>Portföy rolü<select name="role"><option value="lifetime">Ömürlük · kısmi kâr satışı</option><option value="trend">Trend · tam çıkış</option><option value="periodic">Dönemsel · tam çıkış</option></select></label><label>Para birimi<input name="currency" value="USD" required maxlength="8"></label><label>Hedef ağırlık (%)<input name="target_weight" type="text" inputmode="decimal" value="0,00"></label><label>Üst ağırlık (%)<input name="max_weight" type="text" inputmode="decimal" value="0,00"></label><label class="wide">Grafik sağlayıcı sembolü<input name="tv_symbol" placeholder="NASDAQ:AAPL"></label><label>RSI dönemi<input name="rsi_period" type="text" inputmode="decimal" value="14,00"></label><label>Alım bölgesi üst sınırı<input name="buy_zone_max" type="text" inputmode="decimal" value="35,00"></label><label class="wide">Haftalık moda geçiş düşüşü (%)<input name="weekly_brake_drawdown_pct" type="text" inputmode="decimal" value="21,00"></label></div><p class="muted">Varlık ve strateji parametreleri kaydedilir. Otomatik emir veya yeniden dengeleme yapılmaz.</p><div class="dialogactions"><button type="button" class="secondary" id="cancelDialog">Vazgeç</button><button class="primary">Sepete ekle</button></div></form></dialog>
-  <script src="/static/vendor/lightweight-charts.js"></script><script src="/static/chart.js?v=6"></script><script src="/static/app.js?v=8"></script>
+  <dialog id="assetDialog"><form id="assetForm"><div class="dialoghead"><div><p class="eyebrow">SEPET SÖZLEŞMESİ</p><h2>Varlık ekle</h2></div><button type="button" class="x" id="closeDialog" aria-label="Kapat">×</button></div><div class="formgrid"><label>Sembol<div class="asset-symbol-wrap"><input name="symbol" placeholder="örn. AAPL, THYAO" autocomplete="off" class="uppercase" required maxlength="32"><div id="assetModalDropdown" class="trade-dropdown" hidden></div></div></label><label>Piyasa<input name="market" placeholder="NASDAQ / BIST / KRİPTO" required></label><label>Portföy rolü<select name="role"><option value="lifetime">Ömürlük · kısmi kâr satışı</option><option value="trend">Trend · tam çıkış</option><option value="periodic">Dönemsel · tam çıkış</option></select></label><label>Para birimi<input name="currency" value="USD" required maxlength="8"></label><label>Hedef ağırlık (%)<input name="target_weight" type="text" inputmode="decimal" value="0,00"></label><label>Üst ağırlık (%)<input name="max_weight" type="text" inputmode="decimal" value="0,00"></label><label class="wide">Grafik sağlayıcı sembolü<input name="tv_symbol" placeholder="NASDAQ:AAPL"></label><label>RSI dönemi<input name="rsi_period" type="text" inputmode="decimal" value="14,00"></label><label>Alım bölgesi üst sınırı<input name="buy_zone_max" type="text" inputmode="decimal" value="35,00"></label><label class="wide">Haftalık moda geçiş düşüşü (%)<input name="weekly_brake_drawdown_pct" type="text" inputmode="decimal" value="21,00"></label></div><p class="muted">Varlık ve strateji parametreleri kaydedilir. Otomatik emir veya yeniden dengeleme yapılmaz.</p><div class="dialogactions"><button type="button" class="secondary" id="cancelDialog">Vazgeç</button><button class="primary">Sepete ekle</button></div></form></dialog>
+  <dialog id="removeAssetDialog"><form id="removeAssetForm"><div class="dialoghead"><div><p class="eyebrow">İZLEME LİSTESİ</p><h2>Varlığı listeden çıkar</h2></div><button type="button" class="x" id="closeRemoveDialog" aria-label="Kapat">×</button></div><div class="formgrid"><label class="wide">Çıkarılacak varlık<select id="removeAssetSelect" name="asset_id" required><option value="">Varlık seçin</option></select></label></div><p class="muted">Seçilen varlık ve bağlı yerel mum/sinyal kayıtları izleme listesinden kaldırılır.</p><div class="dialogactions"><button type="button" class="secondary" id="cancelRemoveDialog">Vazgeç</button><button class="secondary danger-button" type="submit">Listeden çıkar</button></div></form></dialog>
+  <script src="/static/vendor/lightweight-charts.js"></script><script src="/static/chart.js?v=13"></script><script src="/static/app.js?v=27"></script>
 </body></html>

@@ -26,7 +26,7 @@ Hedef/üst ağırlıklar belirtilmediği için sıfır/boş tutulur. Sembol eşl
 
 Grafik, yerel Lightweight Charts motoruyla çizilir; TradingView iframe'i kullanılmaz. Ana fiyat panelinde çizgi/mum, hacim, Bollinger Bands (20,2), EMA200, son alım/kâr-al seviyeleri ve EKLE/KAR AL işaretleri bulunur. Alt panel, kullanıcı tarafından sağlanan BEKAPTREND Pine kodundaki RSI/ADX çizimlerini ve seviyelerini gösterir. Günlük/haftalık periyot, 5Y/1Y/6A/3A/1A aralıkları ve koyu/açık tema kullanılabilir.
 
-Kapanmış günlük OHLC barları API anahtarı olmadan Yahoo Finance'in grafik akışından alınır. İlk eşitlemede beş yıllık geçmiş yüklenir; veri altı saatte bir yenilenir:
+Kapanmış günlük OHLC barları API anahtarı olmadan Yahoo Finance'in grafik akışından alınır. 200 haftalık EMA'nın TradingView/Pine ile aynı başlangıç etkisine yaklaşması için veri eşitlemesi 10 yıllık geçmiş yükler; istenen geçmiş performans dönemi 5 yıldır ve backtest muhasebesi tamamlanana kadar getiri raporlanmaz. Veri altı saatte bir yenilenir:
 
 - ABD hisseleri/ETF'ler: Yahoo Finance sembolü (AAPL, NVDA, GLD, LLY, CPER).
 - BTC/USD: Yahoo Finance `BTC-USD`; kaynak erişilemezse Coinbase public candles yedeği.

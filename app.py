@@ -15,6 +15,7 @@ import sqlite3
 import statistics
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -26,12 +27,14 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 import bekap_indicators
+import portfolio_engine
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("BEKAP_DB_PATH", ROOT / "bekap.sqlite3"))
 LOGO_CACHE_DIR = ROOT / "cache" / "logos"
 VERSION = "0.2.0"
 WEEKLY_BRAKE_ENGINE_VERSION = "weekly-brake-v1"
+INDICATOR_WARMUP_YEARS = 10
 _INSTRUMENT_SEARCH_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _LOGO_CACHE_LOCK = threading.Lock()
 _LOGO_FETCH_PENDING: set[str] = set()
@@ -48,6 +51,7 @@ def db() -> sqlite3.Connection:
 
 def initialize() -> None:
     with db() as con:
+        portfolio_engine.init_portfolio_db(con)
         con.executescript("""
         CREATE TABLE IF NOT EXISTS strategy_versions(
           id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, version TEXT NOT NULL UNIQUE,
@@ -64,6 +68,11 @@ def initialize() -> None:
           timeframe TEXT NOT NULL CHECK(timeframe IN ('1D','1W')), date TEXT NOT NULL,
           open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL,
           volume REAL, PRIMARY KEY(asset_id,timeframe,date));
+        CREATE TABLE IF NOT EXISTS intraday_bars(
+          asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+          date TEXT NOT NULL, open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL,
+          close REAL NOT NULL, volume REAL, updated_at TEXT NOT NULL,
+          PRIMARY KEY(asset_id,date));
         CREATE TABLE IF NOT EXISTS signals(
           id INTEGER PRIMARY KEY, event_key TEXT NOT NULL UNIQUE,
           asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE, event TEXT NOT NULL,
@@ -86,6 +95,14 @@ def initialize() -> None:
           asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
           action_date TEXT NOT NULL, kind TEXT NOT NULL, value REAL NOT NULL,
           PRIMARY KEY(asset_id,action_date,kind));
+        CREATE TABLE IF NOT EXISTS universe_cache(
+          ticker TEXT PRIMARY KEY,
+          last_close REAL,
+          day_change_pct REAL,
+          price_date TEXT,
+          last_signal_event TEXT,
+          last_signal_date TEXT,
+          updated_at TEXT NOT NULL);
         """)
         signal_columns = {row["name"] for row in con.execute("PRAGMA table_info(signals)")}
         if "is_current" not in signal_columns:
@@ -101,6 +118,8 @@ def initialize() -> None:
               WHEN upper(trim(NEW.symbol))='BTC' THEN 'BTC-USD'
               WHEN upper(trim(NEW.market)) IN ('BIST','BORSA ISTANBUL','ISTANBUL') OR upper(trim(NEW.symbol)) IN ('TUPRS','THYAO')
                 THEN CASE WHEN upper(trim(NEW.symbol)) LIKE '%.IS' THEN upper(trim(NEW.symbol)) ELSE upper(trim(NEW.symbol)) || '.IS' END
+              WHEN upper(trim(NEW.market)) IN ('TSX','TORONTO','TOR')
+                THEN CASE WHEN upper(trim(NEW.symbol)) LIKE '%.TO' THEN upper(trim(NEW.symbol)) ELSE upper(trim(NEW.symbol)) || '.TO' END
               ELSE upper(trim(NEW.symbol))
             END,
             CASE WHEN upper(trim(NEW.market)) IN ('BIST','BORSA ISTANBUL','ISTANBUL') OR upper(trim(NEW.symbol)) IN ('TUPRS','THYAO') THEN 'BIST' ELSE '' END,
@@ -203,6 +222,8 @@ def yahoo_ticker(symbol: str, market: str = "") -> str:
         return "BTC-USD"
     if market in {"BIST", "BORSA ISTANBUL", "ISTANBUL"} or symbol in {"TUPRS", "THYAO"}:
         return symbol if symbol.endswith(".IS") else f"{symbol}.IS"
+    if market in {"TSX", "TORONTO", "TOR"}:
+        return symbol if symbol.endswith(".TO") else f"{symbol}.TO"
     return symbol
 
 
@@ -216,7 +237,7 @@ def completed_daily_through(meta: dict[str, Any], as_of: datetime | None = None)
     local_now = as_of.astimezone(exchange_tz)
     through = local_now.date() - timedelta(days=1)
     tz_name = str(meta.get("exchangeTimezoneName") or "")
-    if "New_York" in tz_name and local_now.hour >= 17:
+    if ("New_York" in tz_name or "Toronto" in tz_name) and local_now.hour >= 17:
         through = local_now.date()
     elif "Istanbul" in tz_name and (local_now.hour, local_now.minute) >= (18, 15):
         through = local_now.date()
@@ -225,19 +246,20 @@ def completed_daily_through(meta: dict[str, Any], as_of: datetime | None = None)
 
 def aggregate_intraday_daily(
     timestamps: list[int], quote: dict[str, list[Any]], meta: dict[str, Any],
-    as_of: datetime | None = None,
+    as_of: datetime | None = None, include_current: bool = False,
 ) -> list[dict[str, Any]]:
-    """Aggregate regular-session hourly candles into completed daily OHLCV bars."""
+    """Aggregate intraday candles into daily bars, optionally including today's open session."""
     try:
         exchange_tz = ZoneInfo(meta.get("exchangeTimezoneName") or "UTC")
     except Exception:
         exchange_tz = timezone.utc
     through = completed_daily_through(meta, as_of)
+    current_day = (as_of or datetime.now(timezone.utc)).astimezone(exchange_tz).date()
     grouped: dict[str, dict[str, Any]] = {}
     fields = {key: quote.get(key) or [] for key in ("open", "high", "low", "close", "volume")}
     for i, timestamp in enumerate(timestamps):
         day = datetime.fromtimestamp(int(timestamp), timezone.utc).astimezone(exchange_tz).date()
-        if day > through:
+        if day > through and not (include_current and day == current_day):
             continue
         try:
             opn, high, low, close = (float(fields[k][i]) for k in ("open", "high", "low", "close"))
@@ -278,10 +300,36 @@ def fetch_yahoo_recent_daily(ticker: str, meta: dict[str, Any]) -> list[dict[str
     return aggregate_intraday_daily(timestamps, quote, meta)
 
 
+def fetch_yahoo_current_bar(ticker: str, meta: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Get the current regular-session partial candle for chart display, never signal confirmation."""
+    query = urlencode({"range": "5d", "interval": "15m", "includePrePost": "false"})
+    request = UrlRequest(
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?{query}",
+        headers={"User-Agent": "Mozilla/5.0 (compatible; BEKAP-Sepet/1.0)"},
+    )
+    with urlopen(request, timeout=15) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    chart = payload.get("chart", {})
+    if chart.get("error") or not chart.get("result"):
+        return None
+    result = chart["result"][0]
+    meta = result.get("meta") or meta or {}
+    quote = (result.get("indicators", {}).get("quote") or [{}])[0]
+    bars = aggregate_intraday_daily(result.get("timestamp") or [], quote, meta, include_current=True)
+    try:
+        exchange_tz = ZoneInfo(meta.get("exchangeTimezoneName") or "UTC")
+    except Exception:
+        exchange_tz = timezone.utc
+    today = datetime.now(timezone.utc).astimezone(exchange_tz).date()
+    if today <= completed_daily_through(meta):
+        return None
+    return next((bar for bar in reversed(bars) if bar["datetime"] == today.isoformat()), None)
+
+
 def fetch_yahoo_chart(symbol: str, market: str = "") -> dict[str, Any]:
-    """Fetch five years of daily candles and actions from the no-key Yahoo chart feed."""
+    """Fetch ten years so the 200-week EMA has sufficient Pine-compatible warm-up history."""
     ticker = yahoo_ticker(symbol, market)
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=5y&interval=1d&events=div%2Csplits"
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range={INDICATOR_WARMUP_YEARS}y&interval=1d&events=div%2Csplits"
     req = UrlRequest(url, headers={"User-Agent": "Mozilla/5.0 (compatible; BEKAP-Sepet/1.0)"})
     with urlopen(req, timeout=25) as response:
         payload = json.loads(response.read().decode("utf-8"))
@@ -336,15 +384,28 @@ def fetch_yahoo_chart(symbol: str, market: str = "") -> dict[str, Any]:
                 actions.append({"date": event_date, "kind": kind, "value": amount})
     if not values:
         raise RuntimeError("Yahoo Finance geçerli, tamamlanmış günlük mum döndürmedi")
+    current_bar = None
+    try:
+        current_bar = fetch_yahoo_current_bar(ticker, meta)
+    except Exception:
+        # Keep completed candles available when the optional intraday feed is unavailable.
+        pass
     return {"values": values, "actions": actions, "meta": meta,
             "intraday_used": bool(intraday_filled_dates),
-            "intraday_last_date": intraday_filled_dates[-1] if intraday_filled_dates else None}
+            "intraday_last_date": intraday_filled_dates[-1] if intraday_filled_dates else None,
+            "current_bar": current_bar}
 
 
 def fetch_coinbase_btc(full_history: bool = True) -> dict[str, Any]:
     # Public BTC-USD candles; page through bounded windows (Coinbase caps each response).
     end = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    start = end.replace(year=end.year - 5) if full_history else end - timedelta(days=2)
+    if full_history:
+        try:
+            start = end.replace(year=end.year - INDICATOR_WARMUP_YEARS)
+        except ValueError:  # Feb 29 in a leap year.
+            start = end.replace(year=end.year - INDICATOR_WARMUP_YEARS, day=28)
+    else:
+        start = end - timedelta(days=2)
     rows: dict[str, dict[str, Any]] = {}
     cursor = start
     while cursor < end:
@@ -389,8 +450,12 @@ def sync_market_data(asset_ids: set[int] | None = None) -> dict[str, Any]:
         try:
             try:
                 payload = fetch_yahoo_chart(asset["symbol"], asset["market"])
-                provider = ("Yahoo Finance · günlük tarihçe + saatlik tamamlayıcı mumlar"
-                            if payload.get("intraday_used") else "Yahoo Finance chart · günlük kapanış")
+                if payload.get("current_bar"):
+                    provider = "Yahoo Finance · kapanış verisi + 15 dk geçici mum"
+                elif payload.get("intraday_used"):
+                    provider = "Yahoo Finance · günlük tarihçe + saatlik tamamlayıcı mumlar"
+                else:
+                    provider = "Yahoo Finance chart · günlük kapanış"
             except Exception as yahoo_error:
                 if asset["symbol"] == "BTC":
                     payload, provider = fetch_coinbase_btc(), "Coinbase public candles · yedek"
@@ -418,6 +483,14 @@ def sync_market_data(asset_ids: set[int] | None = None) -> dict[str, Any]:
                     volume = float(bar["volume"]) if bar.get("volume") not in (None, "") else None
                     con.execute("""INSERT OR REPLACE INTO bars(asset_id,timeframe,date,open,high,low,close,volume)
                         VALUES(?,?,?,?,?,?,?,?)""", (asset["id"], "1D", d.isoformat(), o, h, l, c, volume))
+                current_bar = payload.get("current_bar") if provider.startswith("Yahoo Finance") else None
+                con.execute("DELETE FROM intraday_bars WHERE asset_id=?", (asset["id"],))
+                if current_bar:
+                    con.execute("""INSERT OR REPLACE INTO intraday_bars
+                        (asset_id,date,open,high,low,close,volume,updated_at) VALUES(?,?,?,?,?,?,?,?)""",
+                        (asset["id"], current_bar["datetime"], float(current_bar["open"]),
+                         float(current_bar["high"]), float(current_bar["low"]),
+                         float(current_bar["close"]), float(current_bar.get("volume") or 0), checked))
                 last_date = max(v["datetime"][:10] for v in values)
                 if "actions" in payload:
                     con.execute("DELETE FROM corporate_actions WHERE asset_id=?", (asset["id"],))
@@ -449,15 +522,48 @@ async def auto_sync_loop() -> None:
         await asyncio.sleep(6 * 60 * 60)
 
 
+def sync_intraday_bars() -> int:
+    """Refresh display-only live candles; signal events still use confirmed daily bars."""
+    with db() as con:
+        assets = [dict(row) for row in con.execute(
+            "SELECT id,symbol,market FROM assets WHERE enabled=1 ORDER BY symbol")]
+    updated = 0
+    for asset in assets:
+        try:
+            bar = fetch_yahoo_current_bar(yahoo_ticker(asset["symbol"], asset["market"]))
+        except Exception:
+            continue
+        with db() as con:
+            if bar:
+                con.execute("""INSERT OR REPLACE INTO intraday_bars
+                    (asset_id,date,open,high,low,close,volume,updated_at) VALUES(?,?,?,?,?,?,?,?)""",
+                    (asset["id"], bar["datetime"], float(bar["open"]), float(bar["high"]),
+                     float(bar["low"]), float(bar["close"]), float(bar.get("volume") or 0), now()))
+                updated += 1
+            else:
+                con.execute("DELETE FROM intraday_bars WHERE asset_id=?", (asset["id"],))
+    return updated
+
+
+async def auto_intraday_loop() -> None:
+    while True:
+        await asyncio.sleep(10 * 60)
+        try:
+            await asyncio.to_thread(sync_intraday_bars)
+        except Exception:
+            pass
+
+
 @app.on_event("startup")
 async def startup() -> None:
     initialize()
     asyncio.create_task(auto_sync_loop())
+    asyncio.create_task(auto_intraday_loop())
 
 
 @app.get("/")
 def home() -> FileResponse:
-    return FileResponse(ROOT / "static" / "index.html")
+    return FileResponse(ROOT / "static" / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 def _weekly_ohlc(daily: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -526,35 +632,50 @@ def build_chart_payload(asset_id: int, timeframe: str = "D") -> dict[str, Any]:
                              (asset_id,)).fetchone()
         daily = [dict(r) for r in con.execute("SELECT date,open,high,low,close,volume FROM bars WHERE asset_id=? AND timeframe='1D' ORDER BY date",
                                               (asset_id,))]
+        live_bar = con.execute("SELECT date,open,high,low,close,volume,updated_at FROM intraday_bars WHERE asset_id=? ORDER BY date DESC LIMIT 1",
+                               (asset_id,)).fetchone()
         actions = [dict(r) for r in con.execute("SELECT action_date date,kind,value FROM corporate_actions WHERE asset_id=? ORDER BY action_date",
                                                 (asset_id,))]
-    bars = daily if timeframe == "D" else _weekly_chart_ohlc(daily)
+    daily_display = [dict(row) for row in daily]
+    if live_bar and (not daily or str(live_bar["date"]) > str(daily[-1]["date"])):
+        daily_display.append({"date": live_bar["date"], "open": live_bar["open"], "high": live_bar["high"],
+                              "low": live_bar["low"], "close": live_bar["close"], "volume": live_bar["volume"],
+                              "provisional": True})
+    bars = daily_display if timeframe == "D" else _weekly_chart_ohlc(daily_display)
     if not bars:
         return {"symbol": asset["symbol"], "currency": asset["currency"], "timeframe": timeframe,
-                "bars": [], "indicators": [], "actions": [], "strategy_signals": [], "profile": {},
+                "bars": [], "indicators": [], "actions": [], "strategy_signals": [], "chart_signals": [], "profile": {},
                 "source": source["provider"] if source else None,
                 "last_bar_date": None, "error": source["last_error"] if source else "Henüz fiyat verisi yok."}
     calc = bekap_indicators.calculate(bars, asset["symbol"], asset["market"])
-    daily_calc = calc if timeframe == "D" else bekap_indicators.calculate(daily, asset["symbol"], asset["market"])
+    confirmed_daily_calc = bekap_indicators.calculate(daily, asset["symbol"], asset["market"])
     confirmed_weekly = _weekly_ohlc(daily)
     weekly_calc = (calc if timeframe == "W" and not bars[-1].get("provisional")
                    else bekap_indicators.calculate(confirmed_weekly, asset["symbol"], asset["market"]))
     parameters = json.loads(asset["parameters_json"] or "{}")
     brake_pct = float(parameters.get("weekly_brake_drawdown_pct", DEFAULT_CONFIG["weekly_brake_drawdown_pct"]))
-    strategy_signals = weekly_brake_events(daily, daily_calc["rows"], confirmed_weekly,
+    strategy_signals = weekly_brake_events(daily, confirmed_daily_calc["rows"], confirmed_weekly,
                                            weekly_calc["rows"], brake_pct)
     chart_dates = {str(bar["date"])[:10] for bar in bars}
     for signal in strategy_signals:
         signal_day = date.fromisoformat(signal["signal_date"])
         signal["chart_date"] = (signal_day.isoformat() if timeframe == "D"
                                 else (signal_day - timedelta(days=signal_day.weekday())).isoformat())
-    strategy_signals = [signal for signal in strategy_signals if signal["chart_date"] in chart_dates]
+    own_timeframe = "1D" if timeframe == "D" else "1W"
+    strategy_signals = [signal for signal in strategy_signals
+                        if signal["timeframe"] == own_timeframe and signal["chart_date"] in chart_dates]
     closes = [float(r["close"]) for r in bars]
     rows = calc["rows"]
     current_week_provisional = timeframe == "W" and bool(bars[-1].get("provisional"))
-    if current_week_provisional:
-        # Show the live week's indicator values, but never present an unfinished week as a confirmed signal.
+    current_daily_provisional = timeframe == "D" and bool(bars[-1].get("provisional"))
+    if current_week_provisional or current_daily_provisional:
+        # Display live indicator values, but do not expose an unfinished bar as a confirmed signal.
         rows[-1].update(buy=False, tp=False, cross_up=False, cross_down=False)
+        if timeframe == "D" and confirmed_daily_calc["rows"]:
+            confirmed = confirmed_daily_calc["rows"][-1]
+            for key in ("last_buy", "last_tp"):
+                rows[-1][key] = confirmed.get(key)
+            rows[-1]["buy_diff"] = rows[-1]["tp_diff"] = None
     for i, row in enumerate(rows):
         row["sma200"] = sum(closes[i - 199:i + 1]) / 200 if i >= 199 else None
         if i < 19:
@@ -564,14 +685,33 @@ def build_chart_payload(asset_id: int, timeframe: str = "D") -> dict[str, Any]:
         middle = sum(window) / 20
         deviation = statistics.pstdev(window)
         row.update(bb_mid=middle, bb_upper=middle + 2 * deviation, bb_lower=middle - 2 * deviation)
+    # Chart markers are period-native indicator events. Keep these separate from
+    # strategy_signals, which are the brake-aware events used by the trade journal.
+    chart_timeframe = "1D" if timeframe == "D" else "1W"
+    chart_signals = []
+    for bar, indicator in zip(bars, rows):
+        for event, active, change_key in (
+            ("buy_confirmed", indicator.get("buy"), "buy_diff"),
+            ("take_profit_confirmed", indicator.get("tp"), "tp_diff"),
+        ):
+            if active:
+                chart_signals.append({
+                    "event": event, "timeframe": chart_timeframe,
+                    "signal_date": str(bar["date"])[:10], "chart_date": str(bar["date"])[:10],
+                    "close_price": float(bar["close"]), "rsi": indicator.get("rsi"),
+                    "change_pct": indicator.get(change_key),
+                })
     return {"symbol": asset["symbol"], "market": asset["market"], "currency": asset["currency"],
             "timeframe": timeframe, "bars": bars, "indicators": rows, "actions": actions,
-            "strategy_signals": strategy_signals,
+            "strategy_signals": strategy_signals, "chart_signals": chart_signals,
             "profile": calc["profile"], "indicator_version": calc["version"],
             "source": source["provider"] if source else "—", "last_bar_date": bars[-1]["date"],
             "last_confirmed_bar_date": (confirmed_weekly[-1]["date"] if confirmed_weekly else bars[-1]["date"]),
-            "last_daily_bar_date": daily[-1]["date"] if daily else None,
-            "current_bar_provisional": current_week_provisional,
+            "last_daily_bar_date": daily_display[-1]["date"] if daily_display else None,
+            "last_confirmed_daily_bar_date": daily[-1]["date"] if daily else None,
+            "current_bar_provisional": current_week_provisional or current_daily_provisional,
+            "current_daily_provisional": current_daily_provisional,
+            "intraday_updated_at": live_bar["updated_at"] if live_bar and daily_display[-1].get("provisional") else None,
             "last_checked": source["last_checked"] if source else None, "as_of": now(),
             "confirmed_only": not current_week_provisional}
 
@@ -634,7 +774,8 @@ def search_yahoo_instruments(query: str) -> list[dict[str, Any]]:
             continue
         exchange = str(quote_item.get("exchDisp") or quote_item.get("exchange") or "")
         exchange_upper = exchange.upper()
-        currency = ("TRY" if any(token in exchange_upper for token in ("BIST", "ISTANBUL", "TURKEY")) else
+        currency = ("TRY" if any(token in exchange_upper for token in ("BIST", "ISTANBUL", "TURKEY", "IST")) or symbol.endswith(".IS") else
+                    "CAD" if any(token in exchange_upper for token in ("TSX", "TORONTO")) or symbol.endswith(".TO") else
                     "USD" if any(token in exchange_upper for token in ("NASDAQ", "NYSE", "AMEX", "NMS", "NGM", "NCM", "PCX")) else None)
         results.append({"symbol": symbol, "name": quote_item.get("longname") or quote_item.get("shortname") or symbol,
                         "market": exchange, "currency": currency, "kind": "ETF" if kind == "ETF" else "Hisse"})
@@ -656,6 +797,108 @@ def instrument_search(q: str = "") -> dict[str, Any]:
         raise HTTPException(502, "Hisse ve ETF eşleşmeleri şu anda alınamadı.") from error
     _INSTRUMENT_SEARCH_CACHE[key] = (time.monotonic() + 300, results)
     return {"results": results}
+
+
+def compute_universe_item(ticker: str, symbol: str = "", market: str = "") -> dict[str, Any] | None:
+    """Fetch completed daily history for a universe ticker and compute its latest price and BEKAPRSI signal."""
+    ticker = ticker.strip().upper()
+    if not ticker:
+        return None
+    try:
+        payload = fetch_yahoo_chart(ticker, "")
+        values = payload.get("values") or []
+        if not values:
+            return None
+        daily = [{"date": str(v["datetime"])[:10], "open": float(v["open"]), "high": float(v["high"]),
+                  "low": float(v["low"]), "close": float(v["close"]),
+                  "volume": float(v["volume"]) if v.get("volume") not in (None, "") else 0.0}
+                 for v in values]
+        last_close = daily[-1]["close"]
+        prev_close = daily[-2]["close"] if len(daily) >= 2 else None
+        day_change_pct = ((last_close / prev_close - 1.0) * 100.0
+                          if prev_close not in (None, 0) else None)
+        price_date = daily[-1]["date"]
+        last_signal_event = None
+        last_signal_date = None
+        if len(daily) >= 16:
+            base_sym = symbol.strip().upper() or (ticker[:-3] if ticker.endswith(".IS") else ticker)
+            resolved_mkt = "XIST" if ticker.endswith(".IS") or market.upper() in ("TR", "BIST") else market
+            daily_calc = bekap_indicators.calculate(daily, base_sym, resolved_mkt)
+            weekly = _weekly_ohlc(daily)
+            weekly_calc = bekap_indicators.calculate(weekly, base_sym, resolved_mkt)
+            events = weekly_brake_events(daily, daily_calc["rows"], weekly, weekly_calc["rows"],
+                                         float(DEFAULT_CONFIG["weekly_brake_drawdown_pct"]))
+            if events:
+                last_signal_event = events[-1]["event"]
+                last_signal_date = events[-1]["signal_date"]
+        return {
+            "ticker": ticker,
+            "last_close": last_close,
+            "day_change_pct": day_change_pct,
+            "price_date": price_date,
+            "last_signal_event": last_signal_event,
+            "last_signal_date": last_signal_date,
+            "updated_at": now(),
+        }
+    except Exception:
+        return None
+
+
+def sync_universe_batch(items: list[dict[str, str]], force: bool = False) -> dict[str, dict[str, Any]]:
+    with db() as con:
+        con.execute("""CREATE TABLE IF NOT EXISTS universe_cache(
+          ticker TEXT PRIMARY KEY, last_close REAL, day_change_pct REAL, price_date TEXT,
+          last_signal_event TEXT, last_signal_date TEXT, updated_at TEXT NOT NULL)""")
+        tickers = [str(item.get("ticker") or item.get("symbol") or "").strip().upper() for item in items]
+        tickers = [t for t in tickers if t]
+        if not tickers:
+            return {}
+        placeholders = ",".join("?" for _ in tickers)
+        existing = {row["ticker"]: dict(row) for row in con.execute(
+            f"SELECT * FROM universe_cache WHERE ticker IN ({placeholders})", tuple(tickers))}
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat(timespec="seconds")
+    to_fetch = []
+    results: dict[str, dict[str, Any]] = {}
+    for item in items:
+        t = str(item.get("ticker") or item.get("symbol") or "").strip().upper()
+        if not t:
+            continue
+        cached = existing.get(t)
+        if cached and not force and str(cached.get("updated_at") or "") >= cutoff and cached.get("price_date"):
+            results[t] = cached
+        else:
+            to_fetch.append(item)
+    if to_fetch:
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            futures = [pool.submit(
+                compute_universe_item,
+                str(it.get("ticker") or it.get("symbol") or ""),
+                str(it.get("symbol") or ""),
+                str(it.get("market") or ""),
+            ) for it in to_fetch[:35]]
+            fetched = [f.result() for f in futures]
+        valid = [r for r in fetched if r]
+        if valid:
+            with db() as con:
+                for r in valid:
+                    con.execute("""INSERT OR REPLACE INTO universe_cache
+                        (ticker,last_close,day_change_pct,price_date,last_signal_event,last_signal_date,updated_at)
+                        VALUES(?,?,?,?,?,?,?)""",
+                        (r["ticker"], r["last_close"], r["day_change_pct"], r["price_date"],
+                         r["last_signal_event"], r["last_signal_date"], r["updated_at"]))
+                    results[r["ticker"]] = r
+    return results
+
+
+@app.post("/api/universe/batch")
+async def universe_batch(request: Request) -> dict[str, Any]:
+    body = await request.json()
+    items = body.get("items") or []
+    force = bool(body.get("force", False))
+    if not isinstance(items, list):
+        raise HTTPException(400, "items listesi gerekli.")
+    data = await asyncio.to_thread(sync_universe_batch, items[:35], force)
+    return {"items": data}
 
 
 def logo_response_fallback(symbol: str) -> Response:
@@ -809,7 +1052,8 @@ def rsi_wilder(closes: list[float], period: int = 14) -> list[float | None]:
 
 def weekly_brake_events(daily_bars: list[dict[str, Any]], daily_rows: list[dict[str, Any]],
                         weekly_bars: list[dict[str, Any]], weekly_rows: list[dict[str, Any]],
-                        drawdown_pct: float = 21.0) -> list[dict[str, Any]]:
+                        drawdown_pct: float = 21.0,
+                        include_suppressed: bool = False) -> list[dict[str, Any]]:
     """Apply the requested mode switch: weekly AL during brake, daily SAT always.
 
     The brake is confirmed on a completed daily close at or below the configured
@@ -841,10 +1085,16 @@ def weekly_brake_events(daily_bars: list[dict[str, Any]], daily_rows: list[dict[
                 and close <= last_daily_sat_price * (1.0 - drawdown_pct / 100.0)):
             brake_active = True
 
-        if indicator.get("buy") and not brake_active:
-            events.append({"event": "buy_confirmed", "timeframe": "1D", "signal_date": signal_date,
-                           "close_price": close, "rsi": indicator.get("rsi"),
-                           "change_pct": indicator.get("buy_diff"), "brake_active": False})
+        if indicator.get("buy"):
+            if not brake_active:
+                events.append({"event": "buy_confirmed", "timeframe": "1D", "signal_date": signal_date,
+                               "close_price": close, "rsi": indicator.get("rsi"),
+                               "change_pct": indicator.get("buy_diff"), "brake_active": False})
+            elif include_suppressed:
+                events.append({"event": "buy_confirmed", "timeframe": "1D", "signal_date": signal_date,
+                               "close_price": close, "rsi": indicator.get("rsi"),
+                               "change_pct": indicator.get("buy_diff"), "brake_active": True,
+                               "brake_suppressed": True})
 
         daily_sat = bool(indicator.get("tp"))
         if daily_sat:
@@ -1019,9 +1269,9 @@ async def upload_bars(asset_id: int, request: Request, timeframe: str = "1D") ->
 
 
 @app.get("/api/assets/{asset_id}/signals")
-def asset_signals(asset_id: int) -> list[dict[str, Any]]:
+def asset_signals(asset_id: int, include_suppressed: bool = False) -> list[dict[str, Any]]:
     with db() as con:
-        asset = con.execute("SELECT symbol,market,role,currency FROM assets WHERE id=?", (asset_id,)).fetchone()
+        asset = con.execute("SELECT symbol,market,role,currency,parameters_json FROM assets WHERE id=?", (asset_id,)).fetchone()
         if not asset:
             raise HTTPException(404, "Varlık bulunamadı.")
         signals = [dict(r) for r in con.execute(
@@ -1031,15 +1281,50 @@ def asset_signals(asset_id: int) -> list[dict[str, Any]]:
             "SELECT date,open,high,low,close,volume FROM bars WHERE asset_id=? AND timeframe=? ORDER BY date",
             (asset_id, timeframe))] for timeframe in ("1D", "1W")}
     adx_by_timeframe: dict[str, dict[str, float | None]] = {}
+    calculated_by_timeframe: dict[str, list[dict[str, Any]]] = {}
     for timeframe, values in bars.items():
         if len(values) >= 16:
             calculated = bekap_indicators.calculate(values, asset["symbol"], asset["market"])["rows"]
+            calculated_by_timeframe[timeframe] = calculated
             adx_by_timeframe[timeframe] = {row["date"]: row["adx"] for row in calculated}
     for signal in signals:
         signal["symbol"] = asset["symbol"]
         signal["role"] = asset["role"]
         signal["currency"] = asset["currency"]
         signal["adx"] = adx_by_timeframe.get(signal["timeframe"], {}).get(signal["signal_date"])
+        signal["brake_suppressed"] = False
+    if include_suppressed and len(bars["1D"]) >= 16:
+        parameters = json.loads(asset["parameters_json"] or "{}")
+        drawdown_pct = float(parameters.get("weekly_brake_drawdown_pct", DEFAULT_CONFIG["weekly_brake_drawdown_pct"]))
+        seen = {(s["signal_date"], s["timeframe"], s["event"]) for s in signals}
+        brake_events = weekly_brake_events(
+            bars["1D"], calculated_by_timeframe["1D"],
+            bars["1W"], calculated_by_timeframe.get("1W", []),
+            drawdown_pct, include_suppressed=True,
+        )
+        for ev in brake_events:
+            if not ev.get("brake_suppressed"):
+                continue
+            key = (ev["signal_date"], ev["timeframe"], ev["event"])
+            if key in seen:
+                continue
+            seen.add(key)
+            signals.append({
+                "id": 0,
+                "asset_id": asset_id,
+                "event": ev["event"],
+                "timeframe": ev["timeframe"],
+                "signal_date": ev["signal_date"],
+                "close_price": ev["close_price"],
+                "rsi": ev["rsi"],
+                "symbol": asset["symbol"],
+                "role": asset["role"],
+                "currency": asset["currency"],
+                "adx": adx_by_timeframe.get(ev["timeframe"], {}).get(ev["signal_date"]),
+                "brake_active": True,
+                "brake_suppressed": True,
+            })
+        signals.sort(key=lambda s: (str(s["signal_date"]), int(s.get("id") or 0)), reverse=True)
     return signals
 
 
@@ -1075,4 +1360,70 @@ def backtest_status() -> dict[str, Any]:
     return {"implemented": False, "bars_uploaded": n, "data_range": [start,end],
             "message": "Muhasebe doğru sonuç üretmek için sepet, kur, temettü/bölünme ve maliyet sözleşmesi bekliyor. Henüz getiri hesaplanmıyor.",
             "history_window_years": 5, "forward_cutoff": "2027-01-02", "as_of": date.today().isoformat()}
+
+
+@app.get("/api/portfolio")
+def api_portfolio_get() -> dict[str, Any]:
+    with db() as con:
+        return portfolio_engine.compute_portfolio_data(con)
+
+
+@app.post("/api/portfolio/trade")
+async def api_portfolio_trade_create(request: Request) -> dict[str, Any]:
+    body = await request.json()
+    symbol = body.get("symbol", "").strip()
+    trade_date = body.get("date") or body.get("trade_date") or date.today().isoformat()
+    side = body.get("side", "BUY").strip()
+    try:
+        price = float(body.get("price", 0))
+        quantity = float(body.get("quantity", 0))
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Geçersiz fiyat veya adet.")
+    if not symbol or price <= 0 or quantity <= 0:
+        raise HTTPException(400, "Sembol, pozitif fiyat ve adet zorunludur.")
+    notes = str(body.get("notes") or "").strip()
+    currency = body.get("currency")
+    with db() as con:
+        try:
+            trade = portfolio_engine.record_trade(con, symbol, trade_date, side, price, quantity, notes, currency=currency)
+        except ValueError as err:
+            raise HTTPException(400, str(err)) from err
+    return {"status": "ok", "trade": trade}
+
+
+@app.put("/api/portfolio/trade/{trade_id}")
+async def api_portfolio_trade_update(trade_id: int, request: Request) -> dict[str, Any]:
+    body = await request.json()
+    symbol = body.get("symbol", "").strip()
+    trade_date = body.get("date") or body.get("trade_date") or date.today().isoformat()
+    side = body.get("side", "BUY").strip()
+    try:
+        price = float(body.get("price", 0))
+        quantity = float(body.get("quantity", 0))
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Geçersiz fiyat veya adet.")
+    if not symbol or price <= 0 or quantity <= 0:
+        raise HTTPException(400, "Sembol, pozitif fiyat ve adet zorunludur.")
+    notes = str(body.get("notes") or "").strip()
+    currency = body.get("currency")
+    with db() as con:
+        try:
+            updated = portfolio_engine.update_trade(con, trade_id, symbol, trade_date, side, price, quantity, notes, currency=currency)
+        except ValueError as err:
+            raise HTTPException(400, str(err)) from err
+        if not updated:
+            raise HTTPException(404, "İşlem kaydı bulunamadı.")
+    return {"status": "ok", "trade": updated}
+
+
+@app.delete("/api/portfolio/trade/{trade_id}")
+def api_portfolio_trade_delete(trade_id: int) -> dict[str, Any]:
+    with db() as con:
+        try:
+            deleted = portfolio_engine.delete_trade(con, trade_id)
+        except ValueError as err:
+            raise HTTPException(400, str(err)) from err
+        if not deleted:
+            raise HTTPException(404, "İşlem kaydı bulunamadı.")
+    return {"status": "ok", "deleted": True}
 

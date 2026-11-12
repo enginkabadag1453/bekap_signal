@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const $ = s => document.querySelector(s);
-  const chartState = { instance: null, data: null, axisObserver: null };
+  const chartState = { instance: null, data: null, axisObserver: null, rangeApplied: false, desiredRange: '1Y' };
   const COLORS = { price: '#ffe55d', upper: '#00aaf0', lower: '#00aaf0', basis: '#f47b17', ema: '#ffa500', buy: '#42b765', sell: '#ff4d55', rsi: '#3678ff', adx: '#ff9900', up: '#118b77', down: '#a64254' };
   const SIGNAL_BADGES = { buy: '#00e676', sell: '#ff1744' };
   const n = value => value == null || !Number.isFinite(Number(value)) ? '—' : Number(value).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -63,7 +63,13 @@
   }
 
   function setRange(range) {
+    const host = $('#chart');
     if (!chartState.instance || !chartState.data?.bars?.length) return;
+    chartState.desiredRange = range;
+    if (!host || host.clientWidth <= 0) {
+      chartState.rangeApplied = false;
+      return;
+    }
     const bars = chartState.data.bars;
     const days = { '5Y': 1825, '1Y': 365, '6M': 183, '3M': 92, '1M': 31 }[range] || 365;
     const last = new Date(`${bars[bars.length - 1].date}T12:00:00`);
@@ -71,6 +77,7 @@
     let first = bars.findIndex(b => new Date(`${b.date}T12:00:00`) >= cutoff);
     if (first < 0) first = 0;
     chartState.instance.timeScale().setVisibleLogicalRange({ from: first, to: bars.length + 3 });
+    chartState.rangeApplied = true;
   }
   window.setChartRange = setRange;
 
@@ -108,14 +115,9 @@
     const priceOutline = dark ? '#090c0b' : '#ffffff';
     const grid = dark ? '#1c2220' : '#edf1ec', border = dark ? '#29312d' : '#dfe5df';
     const bars = data.bars, rows = data.indicators, lineMode = $('#chartStyle').value === 'line', p = data.profile || {};
-    // Older running servers may not yet add SMA200 to the response; calculate it from the same completed bars.
-    for (let i = 0; i < rows.length; i++) {
-      if (rows[i].sma200 == null && i >= 199) {
-        rows[i].sma200 = bars.slice(i - 199, i + 1).reduce((sum, bar) => sum + Number(bar.close), 0) / 200;
-      }
-    }
     if (chartState.axisObserver) { chartState.axisObserver.disconnect(); chartState.axisObserver = null; }
     if (chartState.instance) { chartState.instance.remove(); chartState.instance = null; }
+    chartState.rangeApplied = false;
     host.replaceChildren();
     const chart = LightweightCharts.createChart(host, {
       autoSize: true, layout: { background: { type: 'solid', color: bg }, textColor: fg, attributionLogo: true, fontFamily: 'Segoe UI, Arial, sans-serif', fontSize: 12 },
@@ -137,14 +139,14 @@
     main.applyOptions({ priceFormat: { type: 'custom', minMove, formatter: n } });
     main.createPriceLine({ price: Number(bars.at(-1).close), color: priceHighlight, lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, axisLabelVisible: true, title: '' });
 
-    const bb = $('#chartBB').checked, sma = $('#chartSma').checked;
-    let bbUpper = null, bbMiddle = null, bbLower = null, smaSeries = null;
+    const bb = $('#chartBB').checked, emaEnabled = $('#chartEma').checked;
+    let bbUpper = null, bbMiddle = null, bbLower = null, emaSeries = null;
     if (bb) {
       bbUpper = addLine(chart, rows, 'bb_upper', COLORS.upper, 0, { lineWidth: 1, lastValueVisible: false });
       bbMiddle = addLine(chart, rows, 'bb_mid', COLORS.basis, 0, { lineWidth: 1, lastValueVisible: false });
       bbLower = addLine(chart, rows, 'bb_lower', COLORS.lower, 0, { lineWidth: 1, lastValueVisible: false });
     }
-    if (sma) smaSeries = addLine(chart, rows, 'sma200', COLORS.ema, 0, { lineWidth: 2, lastValueVisible: true });
+    if (emaEnabled) emaSeries = addLine(chart, rows, 'ema200', COLORS.ema, 0, { lineWidth: 2, lastValueVisible: true });
     let buyLine = null, takeProfitLine = null;
     if (showLevels) {
       buyLine = addLine(chart, rows, 'last_buy', COLORS.buy, 0, { lineWidth: 2, lastValueVisible: true, lineType: LightweightCharts.LineType.WithSteps });
@@ -163,14 +165,16 @@
 
     const markers = [];
     const signalBadges = [];
+    const ownTimeframe = data.timeframe === 'D' ? '1D' : '1W';
     if (showSignals) {
-      for (const signal of data.strategy_signals || []) {
+      for (const signal of data.chart_signals || []) {
+        if (signal.timeframe !== ownTimeframe) continue;
         const bar = bars.find(item => item.date === signal.chart_date);
         if (!bar) continue;
         const isBuy = signal.event === 'buy_confirmed';
         const change = signal.change_pct == null ? 'İlk' : `${signal.change_pct > 0 ? '+' : ''}${pct(signal.change_pct)}%`;
         signalBadges.push({ time: signal.chart_date, value: Number(isBuy ? bar.low : bar.high),
-          side: isBuy ? 'buy' : 'sell', text: `${isBuy ? 'EKLE' : 'KÂR AL'} (${change})` });
+          side: isBuy ? 'buy' : 'sell', text: `${isBuy ? 'EKLE' : 'KÂR AL'}\n(${change})` });
       }
       for (const action of data.actions || []) {
         if (action.kind !== 'dividend') continue;
@@ -240,7 +244,7 @@
     };
     if ($('#rsiHistoryBuy')) $('#rsiHistoryBuy').textContent = historyRanges.buy ? `${n(historyRanges.buy[0])} – ${n(historyRanges.buy[1])}` : 'Yeterli AL dönüşü yok';
     if ($('#rsiHistorySell')) $('#rsiHistorySell').textContent = historyRanges.sell ? `${n(historyRanges.sell[0])} – ${n(historyRanges.sell[1])}` : 'Yeterli SAT dönüşü yok';
-    const latestSignal = event => (data.strategy_signals || [])
+    const latestSignal = event => (data.chart_signals || [])
       .filter(signal => signal.event === event)
       .sort((a, b) => String(a.signal_date).localeCompare(String(b.signal_date)))
       .at(-1);
@@ -339,21 +343,66 @@
         const pricePaneRect = pricePane.getBoundingClientRect();
         const pricePaneTop = pricePaneRect.top - hostRect.top;
         const pricePaneBottom = pricePaneTop + pricePaneRect.height;
+        const projected = [];
         for (const item of badgeElements) {
           const x = chart.timeScale().timeToCoordinate(item.time);
           const y = main.priceToCoordinate(item.value);
           const absoluteY = y == null ? null : pricePaneTop + y;
           const visible = x != null && absoluteY != null && x >= 0 && x <= host.clientWidth && absoluteY >= pricePaneTop && absoluteY <= pricePaneBottom;
           item.element.style.display = visible ? 'block' : 'none';
-          if (visible) {
-            item.element.style.left = `${x}px`;
-            item.element.style.top = `${absoluteY - 6}px`;
+          if (visible) projected.push({ ...item, x, y: absoluteY, width: item.element.offsetWidth || 68, height: item.element.offsetHeight || 30 });
+        }
+        const MAX_LANES = projected.length > 24 ? 1 : 2;
+        const placedRects = [];
+        const padX = 6, padY = 4;
+        const makeRect = (cx, yEdge, w, h, isAbove) => {
+          const topEdge = isAbove ? yEdge - h : yEdge;
+          return { left: cx - w / 2, right: cx + w / 2, top: topEdge, bottom: topEdge + h };
+        };
+        const fitsBounds = (r) => r.top >= pricePaneTop + 3 && r.bottom <= pricePaneBottom - 3;
+        const overlapsPlaced = (r) => placedRects.some(p =>
+          r.left < p.right + padX && r.right > p.left - padX &&
+          r.top < p.bottom + padY && r.bottom > p.top - padY
+        );
+        projected.sort((a, b) => b.x - a.x || a.y - b.y);
+        for (const item of projected) {
+          const cx = Math.min(host.clientWidth - item.width / 2 - 3, Math.max(item.width / 2 + 3, item.x));
+          const preferredAbove = item.side === 'sell';
+          const candidates = [];
+          for (let lane = 0; lane < MAX_LANES; lane++) {
+            const offset = 8 + lane * (item.height + 5);
+            candidates.push({ above: preferredAbove, yEdge: preferredAbove ? item.y - offset : item.y + offset });
           }
+          for (let lane = 0; lane < MAX_LANES; lane++) {
+            const offset = 8 + lane * (item.height + 5);
+            candidates.push({ above: !preferredAbove, yEdge: !preferredAbove ? item.y - offset : item.y + offset });
+          }
+          let chosen = null;
+          for (const cand of candidates) {
+            const rect = makeRect(cx, cand.yEdge, item.width, item.height, cand.above);
+            if (fitsBounds(rect) && !overlapsPlaced(rect)) {
+              chosen = { ...cand, rect };
+              break;
+            }
+          }
+          if (!chosen) {
+            item.element.style.display = 'none';
+            continue;
+          }
+          placedRects.push(chosen.rect);
+          item.element.classList.toggle('signal-badge-below', !chosen.above);
+          item.element.style.left = `${cx}px`;
+          item.element.style.top = `${chosen.above ? chosen.rect.bottom : chosen.rect.top}px`;
         }
       }
     };
     requestAnimationFrame(positionAxisTags);
-    chartState.axisObserver = new ResizeObserver(() => requestAnimationFrame(positionAxisTags));
+    chartState.axisObserver = new ResizeObserver(() => {
+      if (!chartState.rangeApplied && host.clientWidth > 0) {
+        setRange($('#chartRange')?.value || chartState.desiredRange || '1Y');
+      }
+      requestAnimationFrame(positionAxisTags);
+    });
     chartState.axisObserver.observe(host);
     const indicatorPane = chart.panes()[1]?.getHTMLElement?.();
     if (indicatorPane) chartState.axisObserver.observe(indicatorPane);
@@ -383,6 +432,11 @@
     if (panes[1]) panes[1].setStretchFactor(48);
     const range = $('#chartRange')?.value || '1Y';
     setRange(range);
+    requestAnimationFrame(() => {
+      if (chartState.instance === chart && host.clientWidth > 0) {
+        setRange($('#chartRange')?.value || chartState.desiredRange || '1Y');
+      }
+    });
 
     const latest = rows.at(-1), lastBar = bars.at(-1), previousBar = bars.at(-2);
     const instrumentNames = { AAPL: 'Apple Inc.', NVDA: 'NVIDIA Corporation', GLD: 'SPDR Gold Shares', BTC: 'Bitcoin', LLY: 'Eli Lilly and Company', TUPRS: 'Tüpraş', CPER: 'United States Copper Index Fund', THYAO: 'Türk Hava Yolları' };
@@ -395,30 +449,31 @@
     const instrumentChange = $('#instrumentChange');
     if (instrumentChange) {
       const change = previousBar && Number(previousBar.close) ? (Number(lastBar.close) / Number(previousBar.close) - 1) * 100 : null;
-      instrumentChange.textContent = change == null ? `${dateText(data.last_bar_date)} · ${weekdayTR(data.last_bar_date)}` : `${change >= 0 ? '+' : ''}${pct(change)}% · ${dateText(data.last_bar_date)} · ${weekdayTR(data.last_bar_date)}${data.current_bar_provisional ? ' · geçici hafta' : ''}`;
+      const provisionalLabel = data.current_daily_provisional ? ' · geçici seans' : data.current_bar_provisional ? ' · geçici hafta' : '';
+      instrumentChange.textContent = change == null ? `${dateText(data.last_bar_date)} · ${weekdayTR(data.last_bar_date)}` : `${change >= 0 ? '+' : ''}${pct(change)}% · ${dateText(data.last_bar_date)} · ${weekdayTR(data.last_bar_date)}${provisionalLabel}`;
       instrumentChange.className = change == null ? '' : change >= 0 ? 'positive' : 'negative';
     }
     const instrumentSub = $('#instrumentSub');
-    if (instrumentSub) instrumentSub.textContent = `${data.market || 'Piyasa'} · ${data.currency} · ${data.timeframe === 'D' ? 'Günlük kapanış' : data.current_bar_provisional ? 'Haftalık mum · geçici, kapanmış günlük verilerle' : 'Haftalık kapanış'}`;
+    if (instrumentSub) instrumentSub.textContent = `${data.market || 'Piyasa'} · ${data.currency} · ${data.timeframe === 'D' ? data.current_daily_provisional ? 'Günlük mum · geçici seans verisi' : 'Günlük kapanış' : data.current_bar_provisional ? 'Haftalık mum · geçici seans verisi' : 'Haftalık kapanış'}`;
     if ($('#inspectorRsi')) $('#inspectorRsi').textContent = n(latest.rsi);
     if ($('#inspectorAdx')) $('#inspectorAdx').textContent = n(latest.adx);
     if ($('#buyThreshold')) $('#buyThreshold').textContent = n(p.buy);
     if ($('#sellThreshold')) $('#sellThreshold').textContent = n(p.tp);
     const timeframePill = document.querySelector('.timeframe-pill');
     if (timeframePill) timeframePill.textContent = data.timeframe === 'D' ? 'GÜNLÜK' : 'HAFTALIK';
-    $('#chartLegend').textContent = `${data.symbol} · ${data.timeframe === 'D' ? 'Günlük' : data.current_bar_provisional ? 'Hafta başlangıcı ' + dateText(data.last_bar_date) + ' · geçici veri ' + dateText(data.last_daily_bar_date) : 'Haftalık'} · Kapanış ${n(lastBar.close)} ${data.currency} · Hacim ${n(lastBar.volume)} · Bollinger (20, 2): orta ${n(latest.bb_mid)} / üst ${n(latest.bb_upper)} / alt ${n(latest.bb_lower)} · SMA 200 ${n(latest.sma200)} · RSI ${n(latest.rsi)} · ADX ${n(latest.adx)}`;
+    $('#chartLegend').textContent = `${data.symbol} · ${data.timeframe === 'D' ? data.current_daily_provisional ? 'Günlük geçici seans ' + dateText(data.last_bar_date) : 'Günlük' : data.current_bar_provisional ? 'Hafta başlangıcı ' + dateText(data.last_bar_date) + ' · geçici veri ' + dateText(data.last_daily_bar_date) : 'Haftalık'} · ${data.current_bar_provisional ? 'Fiyat' : 'Kapanış'} ${n(lastBar.close)} ${data.currency} · Hacim ${n(lastBar.volume)} · Bollinger (20, 2): orta ${n(latest.bb_mid)} / üst ${n(latest.bb_upper)} / alt ${n(latest.bb_lower)} · EMA 200 ${n(latest.ema200)} · RSI ${n(latest.rsi)} · ADX ${n(latest.adx)}`;
     const signals = (data.strategy_signals || []).filter(signal => bars.some(bar => bar.date === signal.chart_date)).slice(-30).reverse();
     $('#detailSignals').innerHTML = signals.length ? signals.map(signal => {
       const bar = bars.find(item => item.date === signal.chart_date);
       const buy = signal.event === 'buy_confirmed';
-      return `<div class="signal-item"><span class="signal-date">${dateText(signal.signal_date)}</span><div class="signal-detail-copy"><b><img class="history-logo" src="/api/logos/${encodeURIComponent(data.symbol)}?market=${encodeURIComponent(data.market || '')}" alt="${data.symbol} logosu" data-logo-symbol="${data.symbol}" data-logo-market="${data.market || ''}" loading="lazy" decoding="async" onload="window.scheduleLogoRefresh(this)" onerror="window.fallbackLogo(this)">${buy ? 'EKLE' : 'KÂR AL'} · ${data.symbol}</b><p>Kapanış ${n(signal.close_price ?? bar?.close)} ${data.currency} · Göreli güç (RSI) ${n(signal.rsi)} · Kullanılan ayar: ${p.ticker || data.symbol}</p></div><span class="signal-buy">${signal.timeframe === '1D' ? 'Günlük' : 'Haftalık'}</span></div>`;
+      return `<div class="signal-item ${buy ? 'event-buy' : 'event-sell'}"><span class="signal-date">${dateText(signal.signal_date)}</span><div class="signal-detail-copy"><b><img class="history-logo" src="/api/logos/${encodeURIComponent(data.symbol)}?market=${encodeURIComponent(data.market || '')}" alt="${data.symbol} logosu" data-logo-symbol="${data.symbol}" data-logo-market="${data.market || ''}" loading="lazy" decoding="async" onload="window.scheduleLogoRefresh(this)" onerror="window.fallbackLogo(this)">${buy ? 'EKLE' : 'KÂR AL'} · ${data.symbol}</b><p>Kapanış ${n(signal.close_price ?? bar?.close)} ${data.currency} · Göreli güç (RSI) ${n(signal.rsi)} · Kullanılan ayar: ${p.ticker || data.symbol}</p></div><span class="signal-timeframe-tag">${signal.timeframe === '1D' ? 'Günlük' : 'Haftalık'}</span></div>`;
     }).join('') : '<div class="empty">Gösterilen dönemde ve tamamlanmış mumlarda EKLE veya KÂR AL işareti yok.</div>';
     chart.subscribeCrosshairMove(param => {
       const price = param.seriesData.get(main), r = param.seriesData.get(rsiLine), a = param.seriesData.get(adx);
       if (!price) return;
       const close = lineMode ? price.value : price.close;
-      const upper = bbUpper && param.seriesData.get(bbUpper), middle = bbMiddle && param.seriesData.get(bbMiddle), lower = bbLower && param.seriesData.get(bbLower), smaValue = smaSeries && param.seriesData.get(smaSeries);
-      $('#chartLegend').textContent = `${dateText(price.time)} · ${lineMode ? `Kapanış ${n(price.value)}` : `Açılış ${n(price.open)} · En yüksek ${n(price.high)} · En düşük ${n(price.low)} · Kapanış ${n(close)}`} ${data.currency} · Hacim ${n(bars.find(b => b.date === price.time)?.volume)} · Bollinger orta/üst/alt ${n(middle?.value)} / ${n(upper?.value)} / ${n(lower?.value)} · 200 günlük basit ortalama (SMA) ${n(smaValue?.value)} · Göreli güç (RSI) ${n(r?.value)} · Trend gücü (ADX) ${n(a?.value)}`;
+      const upper = bbUpper && param.seriesData.get(bbUpper), middle = bbMiddle && param.seriesData.get(bbMiddle), lower = bbLower && param.seriesData.get(bbLower), emaValue = emaSeries && param.seriesData.get(emaSeries);
+      $('#chartLegend').textContent = `${dateText(price.time)} · ${lineMode ? `Kapanış ${n(price.value)}` : `Açılış ${n(price.open)} · En yüksek ${n(price.high)} · En düşük ${n(price.low)} · Kapanış ${n(close)}`} ${data.currency} · Hacim ${n(bars.find(b => b.date === price.time)?.volume)} · Bollinger orta/üst/alt ${n(middle?.value)} / ${n(upper?.value)} / ${n(lower?.value)} · 200 dönemlik üssel ortalama (EMA) ${n(emaValue?.value)} · Göreli güç (RSI) ${n(r?.value)} · Trend gücü (ADX) ${n(a?.value)}`;
     });
   }
 })();
